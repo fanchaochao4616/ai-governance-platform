@@ -1,19 +1,18 @@
-"""数据集清洗：不复制全量数据，只记录删除的样本 id，支持按批次恢复。
+"""数据集清洗：不改写原始 data.jsonl，只记录删除 id，支持 diff 回退。
 
 目录（每个数据集）::
 
     data/datasets/{id}/
       data.jsonl              # 原始数据（清洗不改写）
       clean/
-        state.json            # 当前生效的 deleted 集合 + ops 摘要
-        ops/{op_id}.json      # 每次清洗：匹配条件 + 删除的 id 列表
+        state.json            # 当前 deleted 集合 + ops 摘要
+        ops/{op_id}.json      # 每批删除/回退 diff
 
-清洗方式（匹配）::
-  keywords | regex | vector_fast | vector
+匹配方式::
+  keywords | regex | vector_fast | vector | llm | manual（前端勾选）
 
-所有方式均支持 ``invert``（条件反选）：
-  - 正选：删除「匹配」到的样本
-  - 反选：删除「未匹配」的样本（在当前仍生效的样本宇宙中）
+进度：点「删除选中」即写入 delete diff（含保存进度）。
+导出：export-dataset 生成 id_ref 包，仅存生效 id 列表，不复制全文。
 """
 
 from __future__ import annotations
@@ -1093,43 +1092,6 @@ def restore_op(db: Session, dataset_id: int, op_id: str) -> dict[str, Any]:
     }
 
 
-def save_clean_progress(
-    db: Session,
-    dataset_id: int,
-    *,
-    label: str = "",
-) -> dict[str, Any]:
-    """兼容旧接口：进度已由「删除选中」写入 delete diff，不再单独建 checkpoint。
-
-    若当前无任何清洗变更（无 ops），则不写入；有历史时仅返回当前状态摘要。
-    """
-    ds = dms.get_dataset(db, int(dataset_id))
-    if not ds:
-        raise ValueError("dataset not found")
-    dms.ensure_file_package(db, ds)
-    root = store.dataset_root(ds.id)
-    state = sync_state(root) if _ops_dir(root).exists() else load_state(root)
-    original_n = store.count_records(root)
-    deleted_n = len(state.get("deleted_ids") or [])
-    active_n = max(0, original_n - deleted_n)
-    ops = state.get("ops") or []
-    if not ops and deleted_n == 0:
-        raise ValueError("数据未修改，无需保存进度（请先删除选中）")
-    return {
-        "dataset_id": ds.id,
-        "op_id": (ops[0].get("id") if ops else None),
-        "kind": "noop",
-        "skipped": True,
-        "label": (label or "").strip(),
-        "active_count": active_n,
-        "deleted_count": deleted_n,
-        "original_count": original_n,
-        "ops_count": len(ops),
-        "ops": ops,
-        "note": "删除选中时已自动保存 diff 进度；未再写入新快照",
-    }
-
-
 def get_clean_overview(db: Session, dataset_id: int) -> dict[str, Any]:
     ds = dms.get_dataset(db, int(dataset_id))
     if not ds:
@@ -1164,8 +1126,8 @@ def get_clean_overview(db: Session, dataset_id: int) -> dict[str, Any]:
         "preview": preview,
         "suggested_save_name": suggested,
         "note": (
-            "原始 data.jsonl 不改写；删除写入 diff 历史；"
-            "「保存」=进度快照；「导出」=写入数据集库"
+            "原始 data.jsonl 不改写；删除选中=删 id+写 diff；"
+            "导出到库=id_ref 仅存生效 id"
         ),
     }
 

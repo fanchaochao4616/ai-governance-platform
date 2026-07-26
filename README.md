@@ -1,6 +1,6 @@
-# 内容风控文本分类标注平台（PRD v0.5）
+# 内容风控文本分类标注平台（PRD v0.5+）
 
-人工主导的多轮置信度筛选 + 双 Agent Prompt 优化 + 动态 Gold Test Set + Prompt 知识库。
+人工主导的多轮置信度筛选 + 双 Agent Prompt 优化 + 动态 Gold Test Set + Prompt 知识库，并扩展 **数据集库** 与 **多模式数据清洗**。
 
 ## 文档（必读）
 
@@ -17,14 +17,29 @@
 
 ## 能力概览
 
-- **置信度判定（无多分类标签）**：只填风控细则 + 判定阈值；模型输出 confidence，`≥阈值`→`1`，否则`0`  
-- **双 Agent**：质检大模型优化 Prompt；标注小模型打分  
-- **Gold Test Set 迭代**：达用户 Accuracy 阈值或 max iter / token 预算后停止  
-- **永久序号 `seq`**：导入后不变；多轮历史按 seq 聚合；**对模型输入隐藏**  
-- **人工每轮决策**：自定义 High/Medium/Low 置信度分层 → QC → 是否继续 / 下一轮范围  
-- **多轮平均**：多数表决，平票按平均 confidence 破同分  
-- **导入/导出**：CSV、Excel（`.xlsx`）  
-- **Prompt 版本**：时间线、diff、回滚、沉淀为模板  
+### 标注与质检（核心）
+
+- **置信度判定（无多分类标签）**：只填风控细则 + 判定阈值；模型输出 confidence，`≥阈值`→`1`，否则`0`
+- **双 Agent**：质检大模型优化 Prompt；标注小模型打分
+- **Gold Test Set 迭代**：达用户 Accuracy 阈值或 max iter / token 预算后停止
+- **永久序号 `seq`**：导入后不变；多轮历史按 seq 聚合；**对模型输入隐藏**
+- **人工每轮决策**：自定义 High/Medium/Low 置信度分层 → QC → 是否继续 / 下一轮范围
+- **多轮平均**：多数表决，平票按平均 confidence 破同分
+- **导入/导出**：CSV、Excel（`.xlsx`）
+- **Prompt 版本**：时间线、diff、回滚、沉淀为模板
+
+### 数据集库与数据清洗（扩展）
+
+- **数据集库**：上传 CSV/Excel → 训练包 `data/datasets/{id}/`（`data.jsonl` + manifest + 可选向量索引）
+- **多模态检索**：关键词 / 正则 / 快速向量（TF-IDF）/ 语义向量（BGE）
+- **数据清洗**（不改写原始 `data.jsonl`）：
+  - 匹配：关键词、正则、TF-IDF、BGE、本地 LLM（自然语言条件）
+  - 无条件也可在结果列表 **点击勾选** 后删除
+  - **删除选中** = 从生效集移除 id **并**写入 diff 进度（无二次确认）
+  - 结果阈值（向量/LLM）：预览后填分 → 点「应用阈值」本地勾选
+  - **反选**：对当前列表勾选取反（本地，不重跑匹配）
+  - 清洗历史：查看相对当前版本的 diff，可 **回退** 删除批次
+  - **导出到数据集库**：仅存 **生效样本 id 列表**（`id_ref` 包），不复制全文；读取时从源数据集解析
 
 ## 快速开始
 
@@ -34,8 +49,8 @@
 cd E:\vibecoding
 conda activate grok
 pip install -r requirements.txt
-# 若无 .env：copy .env.example .env 并填入 XAI_API_KEY
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# 若无 .env：copy .env.example .env 并填入密钥
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 ### 默认登录（SQLite 账号）
@@ -48,7 +63,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 密码 | `admin123` |
 
 可在 `.env` 用 `DEFAULT_ADMIN_USERNAME` / `DEFAULT_ADMIN_PASSWORD` 覆盖。  
-顶栏用户信息支持 **修改密码**、**退出登录**；会话与用户表均在 SQLite。
+顶栏用户信息支持 **修改密码**、**退出登录**。
 
 ### 备选：项目本地 `.venv`
 
@@ -58,25 +73,33 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
-# 编辑 .env，填入 XAI_API_KEY
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开：http://localhost:8000  
-API 文档：http://localhost:8000/docs  
+浏览器：http://127.0.0.1:8000  
+API 文档：http://127.0.0.1:8000/docs  
 
 ## 推荐操作流程
 
-1. **登录**（默认 `admin` / `admin123`）  
-2. **新建 Job**：填写风控细则（= 初始 Prompt 种子）；可选绑定模板 — **不配**多分类标签 / Token 预算 / 创建时阈值  
-3. 进入 Job 详情 → 右侧 **上传 Dataset + Gold**（label 仅 **0 / 1**）  
-4. **确认开始数据标注** → 自动 Gold 优化 + 全量标注（看 KPI 进度）  
-5. 主栏设 **判定阈值** → 应用；设 **分层切点** + QC 配额 → **应用分层并抽 QC**  
-   - 同时会按 `from_round`–`to_round`（默认当前轮）做多轮平均  
-6. **显示 QC** 在右侧标 0/1；主栏底部可 **改 Prompt** 与 **修改说明**  
-7. **重新标注**：置信度层 from/to（如 Low–Medium）→ 导出 Excel/CSV  
+### A. 数据标注 Job
 
-### 列名约定
+1. **登录**（默认 `admin` / `admin123`）
+2. **新建 Job**：填写风控细则（= 初始 Prompt 种子）；可选绑定模板
+3. 进入 Job 详情 → 右侧 **上传 Dataset + Gold**（label 仅 **0 / 1**）
+4. **确认开始数据标注** → Gold 优化 + 全量标注
+5. 设 **判定阈值** → 分层 + QC → 显示 QC 人工标 0/1
+6. 可改 Prompt、重新标注、导出 Excel/CSV
+
+### B. 数据集库 + 清洗
+
+1. 导航 **数据集库**：上传 CSV/Excel，映射 id/text 列，可选建 BGE 索引  
+2. 导航 **数据清洗**：选择数据集  
+3. 可选：选清洗方式 + 条件 → **预览匹配** → 应用阈值 / 反选 / 点选行  
+4. 或：无条件直接在列表 **点选** 行  
+5. **删除选中** → 写入 diff；历史可回退  
+6. **导出到数据集库** → 生成仅含 id 的引用数据集，之后在库中下载  
+
+### 列名约定（标注导入）
 
 | 字段 | 可选表头 |
 |------|----------|
@@ -84,10 +107,21 @@ API 文档：http://localhost:8000/docs
 | 标签 | `label` / `gold_label` / `标签` |
 | 外部 ID | `id` / `external_id` / `业务ID` |
 
-### 导出
+## 主要 API（节选）
 
-- `GET /api/v1/jobs/{id}/export?format=xlsx` — 多 sheet：`annotations` / `rounds` / `meta`  
-- `GET /api/v1/jobs/{id}/export?format=csv` — zip：`annotations.csv` + `rounds.csv` + `meta.csv`  
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/api/v1/datasets` | 数据集列表 / 创建上传 |
+| POST | `/api/v1/datasets/{id}/search` | 数据集检索 |
+| GET | `/api/v1/datasets/{id}/clean` | 清洗概览 |
+| POST | `/api/v1/datasets/{id}/clean/preview` | 预览匹配 |
+| POST | `/api/v1/datasets/{id}/clean/apply` | 删除选中 + 写 diff |
+| GET | `/api/v1/datasets/{id}/clean/ops/{op_id}` | 查看 diff（含相对当前） |
+| POST | `/api/v1/datasets/{id}/clean/ops/{op_id}/restore` | 回退删除批次 |
+| POST | `/api/v1/datasets/{id}/clean/export-dataset` | 导出 id_ref 到数据集库 |
+| GET | `/api/v1/jobs/{id}/export?format=xlsx\|csv` | Job 标注导出 |
+
+完整见 `/docs`。
 
 ## 环境变量
 
@@ -96,10 +130,11 @@ API 文档：http://localhost:8000/docs
 | `XAI_API_KEY` | xAI API Key | QC 云端调用必填 |
 | `XAI_BASE_URL` | QC API 地址 | `https://api.x.ai/v1` |
 | `XAI_QC_MODEL` | 质检大模型 | `grok-4.5` |
-| `ANNOTATOR_BASE_URL` | 标注小模型 API（OpenAI 兼容） | 默认同 `XAI_BASE_URL`；本机 Ollama 用 `http://127.0.0.1:11434/v1` |
-| `ANNOTATOR_MODEL` / `XAI_ANNOTATOR_MODEL` | 标注小模型名 | 如 `qwen2.5:7b` |
-| `ANNOTATOR_API_KEY` | 小模型密钥 | Ollama 填 `ollama` 即可 |
+| `ANNOTATOR_BASE_URL` | 标注/清洗小模型 API（OpenAI 兼容） | 本机 Ollama：`http://127.0.0.1:11434/v1` |
+| `ANNOTATOR_MODEL` | 小模型名 | 如 `qwen2.5:7b` |
+| `ANNOTATOR_API_KEY` | 小模型密钥 | Ollama 填 `ollama` |
 | `ANNOTATOR_TRUST_ENV` | 是否走系统代理 | 本地 Ollama 建议 `0` |
+| `HF_ENDPOINT` | HuggingFace 镜像（BGE） | 可选 `https://hf-mirror.com` |
 | `DEFAULT_QC_PER_BIN` | 每层默认 QC 数 | `20` |
 | `ANNOTATOR_CONCURRENCY` | 标注并发 | 本地 7B 建议 `1`–`2` |
 
@@ -116,20 +151,46 @@ pytest -q
 
 ```text
 app/
-  main.py              # FastAPI 入口
-  models.py            # SQLAlchemy 实体
-  state_machine.py     # Job 状态
-  agents/              # QCAgent / AnnotatorAgent
-  services/            # 业务服务（含 io_tabular、export）
-  api/                 # REST 路由
-  web/                 # 简单 Web UI
+  main.py                 # FastAPI 入口
+  models.py               # SQLAlchemy 实体（含 ManagedDataset）
+  state_machine.py        # Job 状态
+  agents/                 # QCAgent / AnnotatorAgent
+  services/
+    dataset_store.py      # 训练包读写；id_ref 解析
+    dataset_manage_service.py
+    dataset_vector.py     # TF-IDF / BGE
+    dataset_clean_ops.py  # 清洗 match / apply / diff / id_ref 导出
+    data_clean_service.py # 会话式清洗 API（/data-clean，辅助）
+    ...                   # 标注/Gold/导出等
+  api/
+    routes_datasets.py    # 数据集 + 清洗
+    routes_data_clean.py  # 会话式清洗
+    routes_jobs.py ...
+  web/                    # 原生 Web UI
 config.py / llm_client.py
-data/                  # SQLite、上传、导出（gitignore）
+data/                     # SQLite、datasets/、上传、导出（gitignore）
+docs/
 tests/
+```
+
+### 清洗与 id_ref 包结构
+
+```text
+data/datasets/{id}/
+  data.jsonl              # 源数据（清洗不改写）
+  clean/state.json
+  clean/ops/{op_id}.json  # 删除/回退 diff
+
+data/datasets/{export_id}/   # 导出到库
+  manifest.json           # kind=id_ref, source_dataset_id
+  include_ids.json        # 生效样本 id 列表（无全文副本）
 ```
 
 ## 注意
 
 - 万级数据标注为后台任务，请轮询 Job 状态 / 进度  
 - Token 超预算会进入 `BUDGET_EXCEEDED`  
+- BGE 首次加载较慢；可设置 `HF_ENDPOINT` 镜像  
+- id_ref 数据集依赖源数据集仍存在；删除源包会导致引用解析失败  
 - 内部 pilot：默认 SQLite 单机；生产可迁 PostgreSQL  
+- 运行时数据与密钥勿提交仓库（见 `.gitignore`）

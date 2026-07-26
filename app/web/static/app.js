@@ -3264,14 +3264,6 @@ function getDcScoreThreshold() {
   return dcAppliedScoreThreshold;
 }
 
-/** 读取输入框中的阈值草稿（未点应用前不生效） */
-function parseDcScoreThresholdInput() {
-  const raw = (document.getElementById("dc-min-score")?.value || "").trim();
-  if (raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
 function syncDcApplyScoreButton() {
   const btn = document.getElementById("btn-dc-apply-score");
   if (!btn) return;
@@ -3735,11 +3727,6 @@ function setDcClientRows(rows, opts = {}) {
   syncDcApplyScoreButton();
 }
 
-/** 统计条已移除，保留空函数避免旧调用报错 */
-function renderDcStatsFromOverview(_ov, _extra) {
-  /* no-op：展示区与数据检索一致，底部仅分页 */
-}
-
 /** 「数据集内容」右侧：生效 x / 原始 y（原「共 n 条」位置） */
 function updateDcHeaderCount(extra) {
   const countEl = document.getElementById("dc-result-count");
@@ -4064,7 +4051,6 @@ async function loadDcOverview() {
     ov.deleted_count > 0 ? "已清洗" : "默认（无规则）"
   );
   setDcDiffRestoreButton(null, false);
-  renderDcStatsFromOverview(ov);
   renderDcOpsList(ov.ops || []);
   refreshDcSaveNameDefault(ov);
   // 无条件浏览：服务端分页加载生效样本（可点击勾选）
@@ -4433,11 +4419,6 @@ async function restoreDcOp(opId) {
     }
     toast(e.message, true);
   }
-}
-
-/** @deprecated 界面改用「导出到数据集库」；保留 CSV 下载函数供调试 */
-async function downloadDcEffective() {
-  openDcExportDatasetModal();
 }
 
 document.getElementById("dc-method")?.addEventListener("change", () =>

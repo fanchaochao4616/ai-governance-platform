@@ -38,8 +38,11 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="内容风控文本分类标注平台",
-    description="PRD v0.5 — Dual-Agent Prompt Optimization + Human-led Multi-round QC",
-    version="0.5.0",
+    description=(
+        "PRD v0.5 — Dual-Agent Prompt Optimization + Human-led Multi-round QC; "
+        "Dataset library + multi-mode clean (keywords/vector/LLM)"
+    ),
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -59,7 +62,7 @@ app.include_router(routes_datasets.router, dependencies=_auth)
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": "0.5.0"}
+    return {"ok": True, "version": "0.6.0"}
 
 
 if STATIC_DIR.exists():

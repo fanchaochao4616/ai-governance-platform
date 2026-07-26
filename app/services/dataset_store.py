@@ -209,15 +209,15 @@ def _load_records_id_ref(
 def load_records(
     root: Path, *, limit: int | None = None, _depth: int = 0
 ) -> list[dict[str, Any]]:
-    man = read_manifest(root)
-    if man and str(man.get("kind") or "") == KIND_ID_REF:
+    if is_id_ref_package(root):
+        man = read_manifest(root) or {}
         return _load_records_id_ref(root, man, limit=limit, _depth=_depth)
     return _load_records_plain(root, limit=limit)
 
 
 def count_records(root: Path) -> int:
-    man = read_manifest(root)
-    if man and str(man.get("kind") or "") == KIND_ID_REF:
+    if is_id_ref_package(root):
+        man = read_manifest(root) or {}
         n = man.get("row_count")
         if isinstance(n, int) and n >= 0:
             return n

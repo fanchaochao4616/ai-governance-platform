@@ -1,7 +1,7 @@
 # 项目状态
 
 > 主入口：[plan.md](./plan.md) · 待办：[TODO.md](./TODO.md)  
-> **最后更新**：2026-07-19
+> **最后更新**：2026-07-27
 
 ---
 
@@ -11,9 +11,9 @@
 |----|-----|
 | 产品 | 内容风控文本分类标注平台 |
 | PRD | [PRD_v0.5.md](./PRD_v0.5.md) |
-| 阶段 | **初版可交付（内部 pilot）** — P0 + 多轮 UI 打磨与鉴权已落地 |
-| 测试 | `pytest`：**18 passed**（不依赖真实 LLM） |
-| 交付形态 | FastAPI + 原生 Web UI + SQLite 鉴权 + xAI |
+| 阶段 | **初版可交付（内部 pilot）** — 标注闭环 + 数据集库 + 多模式清洗 |
+| 测试 | `pytest`（不依赖真实 LLM） |
+| 交付形态 | FastAPI + 原生 Web UI + SQLite 鉴权 + xAI / 本地 Ollama |
 
 ---
 
@@ -29,6 +29,28 @@
 | M6 | 监控/测试/README | ✅ | events、metrics、tests、README |
 | M7 | 鉴权 + 详情页密集 UX | ✅ | SQLite 登录；Job 三栏布局；QC/历史占用右侧栏 |
 | M8 | 初版收尾与代码清理 | ✅ | 去掉死代码/脚手架；文档同步至当前行为 |
+| M9 | 数据集库 + 多模式清洗 | ✅ | 训练包存储、TF-IDF/BGE/LLM 清洗、diff 回退、id_ref 导出 |
+
+---
+
+## 数据集与清洗（2026-07 增量）
+
+| 能力 | 状态 | 代码入口 |
+|------|------|----------|
+| 数据集库上传/列表/下载 | ✅ | `dataset_manage_service`, `routes_datasets` |
+| 文件包 data.jsonl + manifest | ✅ | `dataset_store` |
+| TF-IDF / BGE 索引与检索 | ✅ | `dataset_vector` |
+| 清洗 match（kw/regex/vector/llm） | ✅ | `dataset_clean_ops.match_records` |
+| 删除 id + diff 历史 / 回退 | ✅ | `apply_delete`, `restore_op`, `get_op_diff` |
+| 结果阈值 + 反选（前端本地） | ✅ | `app/web/static/app.js` |
+| 无条件列表勾选删除 | ✅ | browse selectable + `manual` apply |
+| 导出到库仅 id 引用 | ✅ | `save_effective_as_dataset` → `kind=id_ref` |
+
+清洗约定：
+
+- **不改写** 原始 `data.jsonl`；`clean/ops/*.json` 记删除/回退
+- **删除选中** = 改 deleted 集合 + 写 diff（进度），无单独「保存进度」按钮
+- **导出到数据集库** = `include_ids.json` + manifest，不复制全文
 
 ---
 

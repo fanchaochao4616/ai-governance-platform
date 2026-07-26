@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -423,45 +423,12 @@ def clean_restore_op(
         raise HTTPException(404 if "不存在" in msg or "not found" in msg else 400, msg) from e
 
 
-@router.get("/{dataset_id}/clean/export")
-def clean_export_csv(dataset_id: int, db: Session = Depends(get_db)) -> FileResponse:
-    """导出当前生效样本 CSV（兼容旧接口；界面主路径请用 export-dataset）。"""
-    try:
-        path, media, filename = dclean.export_effective_csv(db, dataset_id)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    return FileResponse(path, media_type=media, filename=filename)
-
-
-class DatasetCleanProgressBody(BaseModel):
-    """保存清洗进度（写入 diff 历史快照，不建新数据集）。"""
-
-    label: str = Field(default="", max_length=120, description="进度备注（可选）")
-
-
 class DatasetCleanExportDatasetBody(BaseModel):
-    """将当前生效样本导出到数据集库（新建数据集）。"""
+    """将当前生效样本导出到数据集库（仅 id 引用，不复制全文）。"""
 
     name: str = Field(default="", max_length=256, description="新数据集名称")
     description: str | None = Field(default=None, description="说明（可选）")
     build_vectors: bool = Field(default=True, description="是否构建语义向量索引")
-
-
-@router.post("/{dataset_id}/clean/save")
-def clean_save_progress(
-    dataset_id: int,
-    body: DatasetCleanProgressBody | None = None,
-    db: Session = Depends(get_db),
-) -> dict:
-    """保存当前清洗进度：写入一条 checkpoint diff，不新建数据集。"""
-    try:
-        label = (body.label if body else "") or ""
-        return dclean.save_clean_progress(db, dataset_id, label=label)
-    except ValueError as e:
-        msg = str(e)
-        raise HTTPException(404 if "not found" in msg else 400, msg) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, f"保存进度失败: {e}") from e
 
 
 @router.post("/{dataset_id}/clean/export-dataset")
@@ -470,7 +437,7 @@ def clean_export_to_library(
     body: DatasetCleanExportDatasetBody,
     db: Session = Depends(get_db),
 ) -> dict:
-    """导出到数据集库：当前生效样本另存为新数据集，可在数据集库下载。"""
+    """导出到数据集库：只存生效样本 id 列表（id_ref），正文从源数据集解析。"""
     try:
         return dclean.save_effective_as_dataset(
             db,
