@@ -13,6 +13,8 @@ from fastapi import Depends
 
 from app.api import (
     routes_auth,
+    routes_data_clean,
+    routes_datasets,
     routes_export,
     routes_jobs,
     routes_prompts,
@@ -51,6 +53,8 @@ app.include_router(routes_rounds.router, dependencies=_auth)
 app.include_router(routes_prompts.router, dependencies=_auth)
 app.include_router(routes_templates.router, dependencies=_auth)
 app.include_router(routes_export.router, dependencies=_auth)
+app.include_router(routes_data_clean.router, dependencies=_auth)
+app.include_router(routes_datasets.router, dependencies=_auth)
 
 
 @app.get("/api/health")
@@ -65,7 +69,14 @@ if STATIC_DIR.exists():
 @app.get("/")
 def index() -> FileResponse:
     index_path = WEB_DIR / "index.html"
-    return FileResponse(index_path)
+    # 开发期禁用 HTML 缓存，确保脚本 ?v= 与页面同步更新
+    return FileResponse(
+        index_path,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/favicon.ico")

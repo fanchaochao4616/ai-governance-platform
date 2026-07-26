@@ -6,7 +6,7 @@
   <title>内容风控标注平台 v0.5</title>
   <link rel="icon" href="/static/logo-shield.png" type="image/png" />
   <link rel="shortcut icon" href="/static/logo-shield.png" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260727r" />
   <script>
     /* 尽早应用主题，避免闪烁 */
     (function () {
@@ -48,6 +48,50 @@
     </form>
   </div>
 
+  <!-- 提示词调试 · 任务名称（首次保存 / 改名） -->
+  <div id="pd-name-modal" class="modal-overlay" hidden>
+    <form id="form-pd-name" class="login-card card">
+      <h2 id="pd-name-modal-title">设置任务名称</h2>
+      <p class="hint" id="pd-name-modal-hint">留空则使用默认名称，名称保存在数据库中</p>
+      <label>
+        任务名称
+        <input
+          type="text"
+          id="pd-name-modal-input"
+          name="job_name"
+          maxlength="120"
+          autocomplete="off"
+          placeholder="可留空使用默认名称"
+        />
+      </label>
+      <p class="hint pd-name-default-line">
+        默认名称：<code id="pd-name-modal-default">—</code>
+      </p>
+      <div class="tmpl-create-actions">
+        <button type="submit" id="pd-name-modal-ok">确认保存</button>
+        <button type="button" id="pd-name-modal-cancel" class="secondary">取消</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 提示词调试 · 从模板库导入到编辑器 -->
+  <div id="pd-tmpl-modal" class="modal-overlay" hidden>
+    <div class="login-card card pd-tmpl-modal-card">
+      <h2>导入模板</h2>
+      <p class="hint">选择模板库中的提示词，导入到当前编辑器（不会立刻创建任务）</p>
+      <input
+        type="search"
+        id="pd-tmpl-search"
+        placeholder="搜索模板名称 / 分类…"
+        autocomplete="off"
+      />
+      <div id="pd-tmpl-list" class="pd-tmpl-list" role="listbox" aria-label="模板列表"></div>
+      <div class="tmpl-create-actions">
+        <button type="button" id="pd-tmpl-modal-cancel" class="secondary">取消</button>
+      </div>
+    </div>
+  </div>
+
   <div class="app-shell" id="app-shell">
     <!-- 左侧可收起导航 -->
     <aside class="sidenav" id="sidenav" aria-label="主导航">
@@ -71,24 +115,38 @@
         </button>
       </div>
       <nav class="sidenav-nav" id="sidenav-nav">
-        <!-- 一级：统一 Job 列表（所有类型任务，便于恢复） -->
-        <div class="sidenav-group sidenav-group-primary" data-module="jobs">
+        <!-- 一级：数据管理（含二级：数据集库 / 数据检索 / 数据清洗） -->
+        <div class="sidenav-group" data-module="datasets">
+          <div class="sidenav-group-head" title="数据管理 · 库 / 检索 / 清洗" role="button" tabindex="0" aria-expanded="false">
+            <span class="sidenav-ico" aria-hidden="true">▣</span>
+            <span class="sidenav-label sidenav-group-name">数据管理</span>
+            <span class="sidenav-group-chevron" aria-hidden="true">▸</span>
+          </div>
           <div class="sidenav-group-body">
-            <button type="button" class="sidenav-item active" data-view="jobs" title="Job 列表 · 全部任务">
-              <span class="sidenav-ico" aria-hidden="true">☰</span>
-              <span class="sidenav-label">Job 列表</span>
+            <button type="button" class="sidenav-item" data-view="datasets" title="数据集库 · 增删改查">
+              <span class="sidenav-ico" aria-hidden="true">📂</span>
+              <span class="sidenav-label">数据集库</span>
+            </button>
+            <button type="button" class="sidenav-item" data-view="dataset-search" title="数据检索 · 关键词 / 正则 / 向量">
+              <span class="sidenav-ico" aria-hidden="true">🔎</span>
+              <span class="sidenav-label">数据检索</span>
+            </button>
+            <button type="button" class="sidenav-item" data-view="data-clean" title="数据清洗 · 检索筛选 + 规则 + 本地大模型">
+              <span class="sidenav-ico" aria-hidden="true">🧹</span>
+              <span class="sidenav-label">数据清洗</span>
             </button>
           </div>
         </div>
 
         <!-- 以下为任务类型：新建/进入对应工作台，创建的 Job 都进 Job 列表 -->
         <div class="sidenav-group" data-module="annotate">
-          <div class="sidenav-group-head" title="数据标注">
+          <div class="sidenav-group-head" title="数据标注" role="button" tabindex="0" aria-expanded="false">
             <span class="sidenav-ico" aria-hidden="true">✎</span>
             <span class="sidenav-label sidenav-group-name">数据标注</span>
+            <span class="sidenav-group-chevron" aria-hidden="true">▸</span>
           </div>
           <div class="sidenav-group-body">
-            <button type="button" class="sidenav-item" data-view="create" data-job-type="annotation" title="数据标注 · 模板建任务 / 任务列表">
+            <button type="button" class="sidenav-item" data-view="create" data-job-type="annotation" title="数据标注 · 直接进入详情">
               <span class="sidenav-ico" aria-hidden="true">✎</span>
               <span class="sidenav-label">数据标注</span>
             </button>
@@ -96,35 +154,28 @@
         </div>
 
         <div class="sidenav-group" data-module="prompt">
-          <div class="sidenav-group-head" title="提示词调试">
+          <div class="sidenav-group-head" title="提示词调试" role="button" tabindex="0" aria-expanded="false">
             <span class="sidenav-ico" aria-hidden="true">◈</span>
             <span class="sidenav-label sidenav-group-name">提示词调试</span>
+            <span class="sidenav-group-chevron" aria-hidden="true">▸</span>
           </div>
           <div class="sidenav-group-body">
-            <button type="button" class="sidenav-item" data-view="templates" title="提示词调试">
+            <button type="button" class="sidenav-item" data-view="templates" title="提示词调试 · 任务列表">
               <span class="sidenav-ico" aria-hidden="true">◈</span>
               <span class="sidenav-label">提示词调试</span>
             </button>
-          </div>
-        </div>
-
-        <div class="sidenav-group" data-module="clean">
-          <div class="sidenav-group-head" title="数据清洗">
-            <span class="sidenav-ico" aria-hidden="true">🧹</span>
-            <span class="sidenav-label sidenav-group-name">数据清洗</span>
-          </div>
-          <div class="sidenav-group-body">
-            <button type="button" class="sidenav-item" data-view="data-clean" data-job-type="data_clean" title="数据清洗 · 可建任务">
-              <span class="sidenav-ico" aria-hidden="true">🧹</span>
-              <span class="sidenav-label">清洗台</span>
+            <button type="button" class="sidenav-item" data-view="prompt-templates" title="提示词模板库">
+              <span class="sidenav-ico" aria-hidden="true">▤</span>
+              <span class="sidenav-label">提示词模板</span>
             </button>
           </div>
         </div>
 
         <div class="sidenav-group" data-module="search">
-          <div class="sidenav-group-head" title="数据库检索">
+          <div class="sidenav-group-head" title="数据库检索" role="button" tabindex="0" aria-expanded="false">
             <span class="sidenav-ico" aria-hidden="true">🔍</span>
             <span class="sidenav-label sidenav-group-name">数据库检索</span>
+            <span class="sidenav-group-chevron" aria-hidden="true">▸</span>
           </div>
           <div class="sidenav-group-body">
             <button type="button" class="sidenav-item" data-view="data-search" data-job-type="data_search" title="数据库检索 · 可建任务">
@@ -135,9 +186,10 @@
         </div>
 
         <div class="sidenav-group" data-module="generate">
-          <div class="sidenav-group-head" title="数据生成">
+          <div class="sidenav-group-head" title="数据生成" role="button" tabindex="0" aria-expanded="false">
             <span class="sidenav-ico" aria-hidden="true">✦</span>
             <span class="sidenav-label sidenav-group-name">数据生成</span>
+            <span class="sidenav-group-chevron" aria-hidden="true">▸</span>
           </div>
           <div class="sidenav-group-body">
             <button type="button" class="sidenav-item" data-view="data-generate" data-job-type="data_generate" title="数据生成 · 可建任务">
@@ -148,9 +200,10 @@
         </div>
 
         <div class="sidenav-group" data-module="llm-mine">
-          <div class="sidenav-group-head" title="大模型挖掘">
+          <div class="sidenav-group-head" title="大模型挖掘" role="button" tabindex="0" aria-expanded="false">
             <span class="sidenav-ico" aria-hidden="true">⬡</span>
             <span class="sidenav-label sidenav-group-name">大模型挖掘</span>
+            <span class="sidenav-group-chevron" aria-hidden="true">▸</span>
           </div>
           <div class="sidenav-group-body">
             <button type="button" class="sidenav-item" data-view="llm-mine" data-job-type="llm_mine" title="大模型挖掘 · 可建任务">
@@ -169,6 +222,7 @@
           <span id="topbar-title" class="topbar-title">Jobs</span>
         </div>
         <div class="topbar-right">
+          <button type="button" class="top-link" id="btn-jobs" title="Job 任务列表">Job 列表</button>
           <button type="button" class="top-link" data-view="settings" id="btn-settings" title="系统设置">系统设置</button>
           <div class="user-menu-wrap">
             <button type="button" class="user-chip" title="当前用户" id="user-chip">
@@ -204,38 +258,257 @@
       <div id="jobs-table" class="card"></div>
     </section>
 
-    <section id="view-create" class="view">
-      <div class="create-layout create-layout-hub">
-        <div class="create-main create-main-full">
-          <div class="card form create-main-card create-tmpl-card">
-            <div class="tmpl-pick tmpl-pick-top">
-              <label>从模板导入新任务</label>
-              <div class="tmpl-search-row">
-                <input type="search" id="job-tmpl-q" placeholder="搜索模板名称，点选后创建新任务…" autocomplete="off" />
-              </div>
-              <div id="job-tmpl-results" class="job-tmpl-results" hidden></div>
-              <div id="job-tmpl-selected" class="job-tmpl-selected" hidden>
-                <span id="job-tmpl-selected-label"></span>
-                <button type="button" id="btn-job-tmpl-clear" class="secondary">清除</button>
-              </div>
-              <input type="hidden" id="job-tmpl-id" value="" />
-            </div>
+    <!-- 数据管理 · 数据集库：增删改查 · 文本模态 CSV/XLS -->
+    <section id="view-datasets" class="view">
+      <div class="ds-layout">
+        <div class="ds-list-pane card">
+          <div class="ds-list-toolbar">
+            <input
+              type="search"
+              id="ds-q"
+              placeholder="搜索名称 / 说明 / 文件名…"
+              autocomplete="off"
+            />
+            <button type="button" id="btn-ds-new">新建</button>
           </div>
+          <div class="ds-modality-filter" id="ds-modality-filter" title="按模态筛选">
+            <button type="button" class="ds-mod-chip active" data-mod="">全部</button>
+            <button type="button" class="ds-mod-chip" data-mod="text">文本</button>
+            <button type="button" class="ds-mod-chip" data-mod="image" disabled title="暂未实现">图像</button>
+            <button type="button" class="ds-mod-chip" data-mod="audio" disabled title="暂未实现">音频</button>
+            <button type="button" class="ds-mod-chip" data-mod="video" disabled title="暂未实现">视频</button>
+          </div>
+          <div id="ds-list" class="ds-list"></div>
+        </div>
 
-          <div class="create-jobs-block">
-            <div class="jobs-toolbar create-jobs-toolbar">
-              <div class="create-jobs-search-row create-jobs-search-row-full">
-                <input
-                  type="search"
-                  id="create-jobs-q"
-                  placeholder="搜索历史任务：名称 / ID / 状态…"
-                  autocomplete="off"
-                />
+        <div class="ds-detail-pane card">
+          <div id="ds-detail" class="ds-detail" hidden>
+            <div class="ds-detail-head">
+              <div class="ds-detail-titles">
+                <input type="text" id="ds-name" class="ds-name-input" placeholder="数据集名称" maxlength="120" />
+                <span id="ds-meta" class="hint">—</span>
+              </div>
+              <div class="ds-detail-actions">
+                <button type="button" id="btn-ds-save">保存</button>
+                <button type="button" id="btn-ds-download" class="secondary" disabled>下载文件</button>
+                <button type="button" id="btn-ds-delete" class="secondary danger-btn">删除</button>
               </div>
             </div>
-            <div id="create-jobs-table" class="card"></div>
+
+            <div class="ds-detail-fields">
+              <label class="ds-field ds-field-grow">
+                <span class="pd-section-label">说明</span>
+                <input type="text" id="ds-description" placeholder="可选说明" maxlength="500" />
+              </label>
+            </div>
+
+            <div class="ds-file-block">
+              <div class="pd-section-label">训练文件包</div>
+              <div class="ds-file-row">
+                <span id="ds-file-label" class="hint">—</span>
+              </div>
+              <p class="hint" id="ds-train-paths" style="margin-top:8px">—</p>
+            </div>
+
+            <div class="ds-preview-block">
+              <div class="pd-section-label">预览</div>
+              <div class="ds-preview-wrap">
+                <table class="dc-preview-table" id="ds-preview-table">
+                  <thead id="ds-preview-head"></thead>
+                  <tbody id="ds-preview-body"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- 数据管理 · 数据检索（二级） -->
+    <section id="view-dataset-search" class="view">
+      <div class="dss-layout">
+        <div class="card dss-form-card">
+          <div class="dss-search-panel">
+            <div class="pd-section-label">目标数据集</div>
+            <div class="dss-ds-picker-row">
+              <div class="dss-ds-selected" id="dss-ds-selected" title="点击更换数据集">
+                <span class="dss-ds-selected-name" id="dss-ds-selected-name">未选择数据集</span>
+              </div>
+              <button type="button" id="btn-dss-pick-ds" class="secondary">选择数据集</button>
+            </div>
+            <div class="dss-fields" style="margin-top:12px">
+              <label class="ds-field">
+                <span class="pd-section-label">检索方式</span>
+                <select id="dss-mode">
+                  <option value="keywords">（多）关键词</option>
+                  <option value="regex">正则检索</option>
+                  <option value="vector_fast">快速向量检索（TF-IDF）</option>
+                  <option value="vector">语义向量检索（BGE 中文）</option>
+                </select>
+              </label>
+              <label class="ds-field dss-field-query">
+                <span class="pd-section-label" id="dss-query-label">检索条件</span>
+                <textarea
+                  id="dss-query"
+                  rows="3"
+                  placeholder="多个关键词用空格或逗号分隔，例如：作业 孩子"
+                ></textarea>
+              </label>
+              <div class="dss-options dc-match-inline" id="dss-options-match">
+                <label class="dss-check">
+                  <input type="radio" name="dss-match" value="any" checked />
+                  命中任一
+                </label>
+                <label class="dss-check">
+                  <input type="radio" name="dss-match" value="all" />
+                  命中全部
+                </label>
+                <label class="dss-check">
+                  <input type="checkbox" id="dss-case" />
+                  区分大小写
+                </label>
+              </div>
+              <div class="dss-options" id="dss-options-vector" hidden>
+                <label class="ds-field" style="min-width:90px" title="最多返回前 K 条">
+                  <span class="pd-section-label">Top-K</span>
+                  <input type="number" id="dss-top-k" min="1" max="200" value="20" />
+                </label>
+                <label class="ds-field" style="min-width:110px" title="只保留 score ≥ 阈值的结果，再取 Top-K；留空表示不限">
+                  <span class="pd-section-label">阈值 (score≥)</span>
+                  <input
+                    type="number"
+                    id="dss-min-score"
+                    min="-1"
+                    max="5"
+                    step="0.05"
+                    placeholder="不限"
+                  />
+                </label>
+                <span class="hint" id="dss-vector-meta">—</span>
+              </div>
+              <div class="dss-actions">
+                <button type="button" id="btn-dss-run">开始检索</button>
+                <span class="hint" id="dss-status">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card dss-result-card">
+          <div class="dss-result-head-row">
+            <div class="pd-section-label">
+              <span id="dss-result-title">数据集内容</span>
+              <span id="dss-result-badge" class="dss-badge">默认（无规则）</span>
+              <span id="dss-result-count" class="hint"></span>
+            </div>
+            <span class="hint" id="dss-selected-meta">请选择数据集</span>
+          </div>
+          <div class="ds-preview-wrap dss-result-wrap">
+            <table class="dc-preview-table" id="dss-result-table">
+              <thead id="dss-result-head"></thead>
+              <tbody id="dss-result-body"></tbody>
+            </table>
+          </div>
+          <div class="dss-pager" id="dss-pager" hidden>
+            <button type="button" class="secondary" id="dss-page-prev">上一页</button>
+            <span class="dss-page-info" id="dss-page-info">第 1 / 1 页</span>
+            <button type="button" class="secondary" id="dss-page-next">下一页</button>
+            <label class="dss-page-size" title="每页条数">
+              <span>每页</span>
+              <select id="dss-page-size">
+                <option value="20">20</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+              <span>条</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 数据检索 · 选择数据集弹层 -->
+    <div id="dss-ds-modal" class="modal-overlay" hidden>
+      <div class="login-card card dss-ds-modal-card" role="dialog" aria-modal="true" aria-labelledby="dss-ds-modal-title">
+        <h2 id="dss-ds-modal-title">选择数据集</h2>
+        <p class="hint">搜索并点选目标数据集，选中后关闭弹窗</p>
+        <input
+          type="search"
+          id="dss-ds-q"
+          placeholder="搜索数据集名称 / 说明…"
+          autocomplete="off"
+        />
+        <div id="dss-ds-list" class="ds-list dss-ds-modal-list" role="listbox" aria-label="数据集列表"></div>
+        <div class="tmpl-create-actions">
+          <button type="button" id="dss-ds-modal-cancel" class="secondary">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建数据集弹层 -->
+    <div id="ds-create-modal" class="modal-overlay" hidden>
+      <form id="form-ds-create" class="login-card card ds-create-card">
+        <h2>新建数据集</h2>
+        <label>
+          名称
+          <input type="text" id="ds-create-name" name="name" required maxlength="120" placeholder="数据集名称" />
+        </label>
+        <label>
+          模态
+          <select id="ds-create-modality" name="modality">
+            <option value="text" selected>文本（CSV / Excel）</option>
+            <option value="image" disabled>图像（暂未实现）</option>
+            <option value="audio" disabled>音频（暂未实现）</option>
+            <option value="video" disabled>视频（暂未实现）</option>
+          </select>
+        </label>
+        <label>
+          说明（可选）
+          <input type="text" id="ds-create-desc" name="description" maxlength="500" placeholder="备注" />
+        </label>
+        <label>
+          数据文件 <span class="req">*</span>（CSV / Excel）
+          <input type="file" id="ds-create-file" accept=".csv,.xlsx,.xlsm,.xls" required />
+        </label>
+        <div id="ds-create-colmap" class="ds-create-colmap" hidden>
+          <p class="hint ds-map-hint">
+            请勾选哪一列作为 <code>id</code>、哪一列作为 <code>text</code>；创建时将按所选列生成标准数据集。
+          </p>
+          <div class="ds-map-fields">
+            <label class="ds-field">
+              <span class="pd-section-label">ID 列</span>
+              <select id="ds-create-id-column">
+                <option value="">（不使用 ID 列）</option>
+              </select>
+            </label>
+            <label class="ds-field">
+              <span class="pd-section-label">Text 列 <span class="req">*</span></span>
+              <select id="ds-create-text-column" required></select>
+            </label>
+          </div>
+          <div class="ds-create-inspect-meta hint" id="ds-create-inspect-meta"></div>
+          <div class="ds-create-preview-wrap" id="ds-create-preview-wrap" hidden>
+            <div class="pd-section-label">文件预览</div>
+            <div class="ds-preview-wrap ds-create-preview-table-wrap">
+              <table class="dc-preview-table" id="ds-create-preview-table">
+                <thead id="ds-create-preview-head"></thead>
+                <tbody id="ds-create-preview-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <p class="hint">将生成训练文件包（data.jsonl / data.csv）并自动构建向量索引；模态创建后不可更改。</p>
+        <div class="tmpl-create-actions">
+          <button type="submit">创建</button>
+          <button type="button" id="ds-create-cancel" class="secondary">取消</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 数据标注入口已直达详情页；保留空 view 避免旧链接报错 -->
+    <section id="view-create" class="view">
+      <div class="module-placeholder card">
+        <p class="hint">正在进入数据标注详情…</p>
       </div>
     </section>
 
@@ -466,18 +739,63 @@
                 />
               </div>
               <div class="pd-list-new-row">
-                <input
-                  type="text"
-                  id="prompt-debug-new-name"
-                  class="pd-list-new-name"
-                  placeholder="新建任务名称"
-                  autocomplete="off"
-                  maxlength="120"
-                />
-                <button type="button" id="btn-new-prompt-debug">新建</button>
+                <button type="button" id="btn-new-prompt-debug" title="进入提示词调试草稿">新建</button>
               </div>
             </div>
             <div id="prompt-debug-jobs-table" class="card"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 提示词模板库：列表 + 详情编辑 -->
+    <section id="view-prompt-templates" class="view">
+      <div class="pt-layout">
+        <div class="pt-list-pane card">
+          <div class="pt-list-toolbar">
+            <input
+              type="search"
+              id="pt-lib-q"
+              placeholder="搜索模板名称 / 分类…"
+              autocomplete="off"
+            />
+            <button type="button" id="btn-pt-new">新建模板</button>
+          </div>
+          <div id="pt-lib-list" class="pt-lib-list"></div>
+        </div>
+        <div class="pt-detail-pane card">
+          <div id="pt-detail" class="pt-detail" hidden>
+            <div class="pt-detail-head">
+              <div class="pt-detail-titles">
+                <input type="text" id="pt-name" class="pt-name-input" placeholder="模板名称" maxlength="120" />
+                <span id="pt-meta" class="hint">—</span>
+              </div>
+              <div class="pt-detail-actions">
+                <button type="button" id="btn-pt-save-version">保存</button>
+              </div>
+            </div>
+            <div class="pt-detail-fields">
+              <label class="pt-field">
+                <span class="pd-section-label">分类</span>
+                <input type="text" id="pt-category" placeholder="general" maxlength="64" />
+              </label>
+              <label class="pt-field pt-field-grow">
+                <span class="pd-section-label">说明</span>
+                <input type="text" id="pt-description" placeholder="可选说明" maxlength="500" />
+              </label>
+            </div>
+            <label class="pt-field pt-prompt-field">
+              <span class="pd-section-label">提示词正文（激活版）</span>
+              <textarea id="pt-prompt" class="pt-prompt-editor" spellcheck="false" placeholder="模板提示词全文…"></textarea>
+            </label>
+            <label class="pt-field">
+              <span class="pd-section-label">版本说明</span>
+              <input type="text" id="pt-change-reason" placeholder="有正文改动时写入版本说明（可选）" maxlength="500" />
+            </label>
+            <div class="pt-versions-block">
+              <div class="pd-section-label">版本历史</div>
+              <div id="pt-versions" class="pt-versions"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -489,10 +807,24 @@
         <div class="pd-main">
           <div class="pd-main-head page-head">
             <div class="pd-main-titles">
-              <span id="pd-job-meta" class="hint">未选中任务</span>
+              <div class="pd-job-name-row">
+                <span
+                  id="pd-job-name-text"
+                  class="pd-job-name-text"
+                  title="点击可修改名称（已保存任务）"
+                >—</span>
+                <button
+                  type="button"
+                  id="btn-pd-rename"
+                  class="secondary btn-pd-rename"
+                  hidden
+                  title="修改任务名称"
+                >改名</button>
+              </div>
+              <span id="pd-job-meta" class="hint">未保存草稿</span>
             </div>
             <div class="pd-main-actions page-head-actions">
-              <button type="button" id="btn-pd-back" class="secondary">返回任务列表</button>
+              <button type="button" id="btn-pd-import-template" class="secondary" title="从模板库导入提示词到编辑器">导入模板</button>
               <button type="button" id="btn-pd-save">保存版本</button>
             </div>
           </div>
@@ -543,19 +875,210 @@
       </div>
     </section>
     <section id="view-data-clean" class="view">
-      <div class="page-head">
-        <h2 class="page-title">清洗台</h2>
-      </div>
-      <div class="module-placeholder card">
-        <div class="module-ph-icon" aria-hidden="true">🧹</div>
-        <p class="hint">去重、格式规范、敏感字段处理等。任务统一保存在 <strong>Job 列表</strong>。</p>
-        <p class="module-ph-status">功能建设中 · 可先建任务占位</p>
-        <div class="module-ph-actions">
-          <button type="button" class="btn-create-typed-job" data-job-type="data_clean">新建清洗任务</button>
-          <button type="button" class="secondary" data-goto="jobs">打开 Job 列表</button>
+      <div class="dss-layout">
+        <div class="card dss-form-card">
+          <div class="dss-search-panel">
+            <div class="pd-section-label">目标数据集</div>
+            <div class="dss-ds-picker-row">
+              <div class="dss-ds-selected" id="dc-ds-selected" title="点击更换数据集">
+                <span class="dss-ds-selected-name is-empty" id="dc-ds-selected-name">未选择数据集</span>
+              </div>
+              <button type="button" id="btn-dc-pick-ds" class="secondary">选择数据集</button>
+            </div>
+
+            <div class="dss-fields" style="margin-top:12px">
+              <label class="ds-field">
+                <span class="pd-section-label">清洗方式</span>
+                <select id="dc-method">
+                  <option value="keywords">关键词匹配</option>
+                  <option value="regex">正则匹配</option>
+                  <option value="vector_fast">快速向量匹配（TF-IDF）</option>
+                  <option value="vector">语义向量匹配（BGE）</option>
+                  <option value="llm">大模型清洗（本地 Qwen）</option>
+                </select>
+              </label>
+              <div class="ds-field dss-field-query">
+                <div class="dc-query-label-row">
+                  <span class="pd-section-label">清洗条件</span>
+                </div>
+                <textarea
+                  id="dc-query"
+                  rows="3"
+                  placeholder="可留空=匹配全部生效样本；有内容则按清洗方式匹配"
+                ></textarea>
+              </div>
+              <div class="dss-options dc-match-inline" id="dc-options-match">
+                <label class="dss-check">
+                  <input type="radio" name="dc-match" value="any" checked />
+                  命中任一
+                </label>
+                <label class="dss-check">
+                  <input type="radio" name="dc-match" value="all" />
+                  命中全部
+                </label>
+                <label class="dss-check">
+                  <input type="checkbox" id="dc-case" />
+                  区分大小写
+                </label>
+              </div>
+              <label class="ds-field">
+                <span class="pd-section-label">备注（可选）</span>
+                <input type="text" id="dc-label" maxlength="120" placeholder="本次清洗说明，便于历史恢复" />
+              </label>
+
+              <div class="dss-actions">
+                <button type="button" id="btn-dc-preview" class="secondary">预览匹配</button>
+                <button
+                  type="button"
+                  id="btn-dc-apply"
+                  title="删除勾选样本并写入 diff 进度（无需二次确认）"
+                >
+                  删除选中
+                </button>
+                <button
+                  type="button"
+                  id="btn-dc-export"
+                  disabled
+                  title="将当前生效样本导出为数据集库中的新数据集，可在库中下载"
+                >
+                  导出到数据集库
+                </button>
+                <span class="hint" id="dc-status" hidden>—</span>
+              </div>
+
+              <div class="pd-section-label" style="margin-top:8px">清洗历史（点 diff 查看相对当前的差异 · 可回退）</div>
+              <div id="dc-ops-list" class="dc-ops-list">
+                <p class="hint" style="padding:10px">暂无清洗记录</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card dss-result-card">
+          <div class="dss-result-head-row">
+            <div class="pd-section-label">
+              <span id="dc-result-title">数据集内容</span>
+              <span id="dc-result-badge" class="dss-badge dss-badge-default">默认（无规则）</span>
+              <span id="dc-result-count" class="hint"></span>
+            </div>
+            <div class="dc-result-head-right">
+              <button type="button" id="btn-dc-diff-restore" class="secondary" hidden>
+                回退本批
+              </button>
+              <span class="hint" id="dc-selected-meta">请选择数据集</span>
+            </div>
+          </div>
+          <!-- 结果区工具条：阈值（向量/大模型）+ 反选（所有方式）同一行 -->
+          <div class="dc-result-toolbar" id="dc-result-toolbar">
+            <div class="dc-score-opts" id="dc-options-score" hidden>
+              <label
+                class="ds-field dc-score-field"
+                id="dc-min-score-field"
+                title="预览后默认全不选；输入阈值后点「应用阈值」才选中 score≥阈值"
+              >
+                <span class="pd-section-label">结果阈值 (score≥)</span>
+                <input
+                  type="number"
+                  id="dc-min-score"
+                  min="-1"
+                  max="5"
+                  step="0.05"
+                  placeholder="例如 0.6"
+                />
+              </label>
+              <button
+                type="button"
+                id="btn-dc-apply-score"
+                class="secondary"
+                disabled
+                title="对当前预览结果应用阈值：选中 score≥输入值（本地，不重跑匹配）"
+              >
+                应用阈值
+              </button>
+            </div>
+            <button
+              type="button"
+              id="btn-dc-invert"
+              class="secondary"
+              disabled
+              title="对当前结果勾选取反（本地瞬间完成，不重跑匹配；所有清洗方式可用）"
+            >
+              反选
+            </button>
+            <span class="hint" id="dc-score-hint">预览后可反选；带分方式可应用阈值</span>
+          </div>
+          <div class="ds-preview-wrap dss-result-wrap">
+            <table class="dc-preview-table" id="dc-preview-table">
+              <thead id="dc-preview-head"></thead>
+              <tbody id="dc-preview-body"></tbody>
+            </table>
+          </div>
+          <div class="dss-pager" id="dc-pager" hidden>
+            <button type="button" class="secondary" id="dc-page-prev">上一页</button>
+            <span class="dss-page-info" id="dc-page-info">第 1 / 1 页</span>
+            <button type="button" class="secondary" id="dc-page-next">下一页</button>
+            <label class="dss-page-size" title="每页条数">
+              <span>每页</span>
+              <select id="dc-page-size">
+                <option value="20">20</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+              <span>条</span>
+            </label>
+          </div>
         </div>
       </div>
     </section>
+
+    <!-- 数据清洗 · 选择数据集弹层 -->
+    <div id="dc-ds-modal" class="modal-overlay" hidden>
+      <div class="login-card card dss-ds-modal-card" role="dialog" aria-modal="true" aria-labelledby="dc-ds-modal-title">
+        <h2 id="dc-ds-modal-title">选择数据集</h2>
+        <p class="hint">搜索并点选目标数据集（来自数据集库）</p>
+        <input
+          type="search"
+          id="dc-ds-q"
+          placeholder="搜索数据集名称 / 说明…"
+          autocomplete="off"
+        />
+        <div id="dc-ds-list" class="ds-list dss-ds-modal-list" role="listbox" aria-label="数据集列表"></div>
+        <div class="tmpl-create-actions">
+          <button type="button" id="dc-ds-modal-cancel" class="secondary">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 数据清洗 · 导出到数据集库弹层 -->
+    <div id="dc-save-modal" class="modal-overlay" hidden>
+      <form id="form-dc-save" class="login-card card" role="dialog" aria-modal="true" aria-labelledby="dc-save-modal-title">
+        <h2 id="dc-save-modal-title">导出到数据集库</h2>
+        <p class="hint" id="dc-save-modal-hint">
+          将当前生效样本导出为数据集库中的新数据集（仅保存 id 引用，不复制全文以节省空间）；之后可在数据集库下载。不修改本数据集清洗进度。
+        </p>
+        <label>
+          数据集名称
+          <input
+            type="text"
+            id="dc-save-name"
+            name="name"
+            required
+            maxlength="120"
+            placeholder="原名_清洗_时间"
+            autocomplete="off"
+          />
+        </label>
+        <p class="hint" id="dc-save-name-hint" style="margin:6px 0 0">
+          默认：原始数据名 + 清洗 + 时间，可修改
+        </p>
+        <p class="login-error" id="dc-save-error" hidden></p>
+        <div class="tmpl-create-actions" style="margin-top:14px">
+          <button type="button" id="dc-save-modal-cancel" class="secondary">取消</button>
+          <button type="submit" id="dc-save-modal-confirm">确认导出</button>
+        </div>
+      </form>
+    </div>
     <section id="view-data-search" class="view">
       <div class="page-head">
         <h2 class="page-title">检索台</h2>
@@ -633,6 +1156,7 @@
   </div><!-- /.app-shell -->
 
   <div id="toast"></div>
-  <script src="/static/app.js"></script>
+  <!-- v 参数强制刷新，避免浏览器缓存旧逻辑（如新建仍弹名称框） -->
+  <script src="/static/app.js?v=20260728e"></script>
 </body>
 </html>

@@ -14,7 +14,31 @@ load_dotenv(_ROOT / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(_ROOT / "data")))
 UPLOAD_DIR = DATA_DIR / "uploads"
 EXPORT_DIR = DATA_DIR / "exports"
+DATASET_DIR = DATA_DIR / "datasets"
+# 兼容旧路径；新结构为 data/datasets/{id}/（JSONL 训练包）
+DATASET_RAW_DIR = DATASET_DIR / "raw"
 DB_PATH = Path(os.getenv("DB_PATH", str(DATA_DIR / "app.db")))
+
+# 数据集语义向量检索（mode=vector）
+# 固定使用本地中文 embedding：BAAI/bge-small-zh-v1.5（sentence-transformers）
+# 可选 EMBEDDING_PROVIDER=api 走云端 OpenAI 兼容 embeddings
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "model").strip().lower()
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "512"))
+# 云端 embedding 模型名（仅 api 模式）
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small").strip()
+# 本地中文语义模型
+LOCAL_EMBEDDING_MODEL = os.getenv(
+    "LOCAL_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"
+).strip()
+EMBEDDING_BASE_URL = os.getenv(
+    "EMBEDDING_BASE_URL",
+    os.getenv("XAI_BASE_URL", "https://api.x.ai/v1"),
+).rstrip("/")
+EMBEDDING_API_KEY = (
+    os.getenv("EMBEDDING_API_KEY", "").strip()
+    or os.getenv("XAI_API_KEY", "").strip()
+    or os.getenv("OPENAI_API_KEY", "").strip()
+)
 
 # xAI 云端（Grok）— 有额度时作质检首选
 XAI_BASE_URL = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/")
@@ -142,3 +166,5 @@ def ensure_data_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    DATASET_DIR.mkdir(parents=True, exist_ok=True)
+    DATASET_RAW_DIR.mkdir(parents=True, exist_ok=True)

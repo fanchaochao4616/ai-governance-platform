@@ -98,21 +98,25 @@ def create_job(db: Session, body: JobCreate) -> Job:
     db.flush()
 
     # 始终写入 Prompt v1 = 合并后的种子文案（提示词调试可为空白）
+    if job_type == "annotation":
+        seed_reason = "seed from policy_rules (细则与初始 Prompt 合并)"
+    elif job_type == "prompt_debug":
+        custom_reason = (getattr(body, "seed_change_reason", None) or "").strip()
+        if custom_reason:
+            seed_reason = custom_reason
+        elif seed_prompt:
+            seed_reason = "初始版本"
+        else:
+            seed_reason = "empty seed for prompt debug"
+    else:
+        seed_reason = f"seed for {job_type} job"
     db.add(
         PromptVersion(
             job_id=job.id,
             version=1,
             prompt_text=seed_prompt,
             parent_version=None,
-            change_reason=(
-                "seed from policy_rules (细则与初始 Prompt 合并)"
-                if job_type == "annotation"
-                else (
-                    "empty seed for prompt debug"
-                    if job_type == "prompt_debug"
-                    else f"seed for {job_type} job"
-                )
-            ),
+            change_reason=seed_reason,
             is_active=True,
         )
     )
@@ -134,6 +138,33 @@ def list_jobs(db: Session) -> list[Job]:
 
 def get_job(db: Session, job_id: int) -> Job | None:
     return db.get(Job, job_id)
+
+
+def update_job_name(db: Session, job: Job, name: str) -> Job:
+    """更新任务名称（trim 后非空）。"""
+    trimmed = (name or "").strip()
+    if not trimmed:
+        raise ValueError("任务名称不能为空")
+    if len(trimmed) > 256:
+        raise ValueError("任务名称过长（最多 256 字）")
+    if job.name == trimmed:
+        return job
+    old = job.name
+    job.name = trimmed
+    # 提示词调试：policy 仅作占位时与名称同步，避免列表/恢复识别漂移
+    if (job.job_type or "") == "prompt_debug":
+        pol = (job.policy_rules or "").strip()
+        if not pol or pol == (old or "").strip():
+            job.policy_rules = trimmed
+    log_event(
+        db,
+        "job.renamed",
+        job_id=job.id,
+        payload={"from": old, "to": trimmed},
+    )
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 # 仅允许在「首次开跑前」或「可重新标注」时改 Gold 参数；loop 进行中禁止

@@ -15,6 +15,7 @@ from app.schemas import (
     JobBulkDeleteRequest,
     JobCreate,
     JobGoldParamsUpdate,
+    JobNameUpdate,
     JobOut,
     UploadResult,
 )
@@ -70,6 +71,23 @@ def get_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
     job = job_service.get_job(db, job_id)
     if not job:
         raise HTTPException(404, "job not found")
+    return job_service.job_to_out(db, job)
+
+
+@router.patch("/jobs/{job_id}/name", response_model=JobOut)
+def update_job_name(
+    job_id: int,
+    body: JobNameUpdate,
+    db: Session = Depends(get_db),
+) -> JobOut:
+    """更新任务显示名称（提示词调试保存版本时可改名）。"""
+    job = job_service.get_job(db, job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    try:
+        job = job_service.update_job_name(db, job, body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return job_service.job_to_out(db, job)
 
 

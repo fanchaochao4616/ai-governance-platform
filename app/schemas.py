@@ -54,6 +54,11 @@ class JobCreate(BaseModel):
         default=None,
         description="Deprecated: merged into policy_rules",
     )
+    # 提示词调试首次保存：写入 Prompt v1 的 change_reason
+    seed_change_reason: str | None = Field(
+        default=None,
+        description="Optional change_reason for Prompt v1 (prompt_debug first save)",
+    )
 
 
 class JobOut(BaseModel):
@@ -82,6 +87,12 @@ class JobOut(BaseModel):
     updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class JobNameUpdate(BaseModel):
+    """更新任务显示名称。"""
+
+    name: str = Field(..., min_length=1, max_length=256, description="任务名称")
 
 
 class JobGoldParamsUpdate(BaseModel):

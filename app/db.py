@@ -97,13 +97,96 @@ def init_db() -> None:
                             "WHERE job_type IS NULL OR job_type = ''"
                         )
                     )
+        # 数据集管理：元数据列迁移（样本在文件包，不靠 SQL 行）
+        if "managed_datasets" in insp.get_table_names():
+            mdcols = {c["name"] for c in insp.get_columns("managed_datasets")}
+            alters = []
+            if "id_column" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets ADD COLUMN id_column VARCHAR(128)"
+                )
+            if "storage_backend" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets "
+                    "ADD COLUMN storage_backend VARCHAR(32) DEFAULT 'files'"
+                )
+            if "root_path" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets ADD COLUMN root_path VARCHAR(1024)"
+                )
+            if "raw_archive_path" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets "
+                    "ADD COLUMN raw_archive_path VARCHAR(1024)"
+                )
+            if "source_id_column" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets "
+                    "ADD COLUMN source_id_column VARCHAR(128)"
+                )
+            if "source_text_column" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets "
+                    "ADD COLUMN source_text_column VARCHAR(128)"
+                )
+            if "vector_ready" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets "
+                    "ADD COLUMN vector_ready BOOLEAN DEFAULT 0"
+                )
+            if "vector_model" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets "
+                    "ADD COLUMN vector_model VARCHAR(128)"
+                )
+            if "vector_dim" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets ADD COLUMN vector_dim INTEGER"
+                )
+            if "vector_count" not in mdcols:
+                alters.append(
+                    "ALTER TABLE managed_datasets "
+                    "ADD COLUMN vector_count INTEGER DEFAULT 0"
+                )
+            if alters:
+                with engine.begin() as conn:
+                    for sql in alters:
+                        conn.execute(text(sql))
+        if "managed_dataset_rows" in insp.get_table_names():
+            rcols = {c["name"] for c in insp.get_columns("managed_dataset_rows")}
+            with engine.begin() as conn:
+                if "content_hash" not in rcols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE managed_dataset_rows "
+                            "ADD COLUMN content_hash VARCHAR(64)"
+                        )
+                    )
+                if "embedding" not in rcols:
+                    conn.execute(
+                        text("ALTER TABLE managed_dataset_rows ADD COLUMN embedding JSON")
+                    )
+                if "embedding_model" not in rcols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE managed_dataset_rows "
+                            "ADD COLUMN embedding_model VARCHAR(128)"
+                        )
+                    )
+                if "extra" not in rcols:
+                    conn.execute(
+                        text("ALTER TABLE managed_dataset_rows ADD COLUMN extra JSON")
+                    )
         from app.services.auth_service import ensure_default_admin
+        from app.services.dataset_manage_service import migrate_all_file_datasets_to_sql
         from app.services.template_service import ensure_legacy_versions
 
         db = SessionLocal()
         try:
             ensure_legacy_versions(db)
             ensure_default_admin(db)
+            # 旧版磁盘服务文件 → SQL 样本行 + raw 归档
+            migrate_all_file_datasets_to_sql(db)
         finally:
             db.close()
     except Exception:  # noqa: BLE001

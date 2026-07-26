@@ -190,11 +190,14 @@ document.getElementById("form-change-pwd")?.addEventListener("submit", async (e)
 /** 顶栏标题：与侧栏二级入口文案一致 */
 const VIEW_TITLES = {
   jobs: "Job 列表",
+  datasets: "数据集库",
+  "dataset-search": "数据检索",
   create: "数据标注",
-  detail: "任务详情",
+  detail: "数据标注",
   templates: "提示词调试",
   "prompt-debug": "提示词调试",
-  "data-clean": "清洗台",
+  "prompt-templates": "提示词模板",
+  "data-clean": "数据清洗",
   "data-search": "检索台",
   "data-generate": "生成台",
   "llm-mine": "挖掘台",
@@ -217,7 +220,7 @@ const JOB_TYPE_META = {
   },
   data_clean: {
     label: "数据清洗",
-    module: "clean",
+    module: "datasets",
     view: "data-clean",
     icon: "🧹",
   },
@@ -244,11 +247,14 @@ const JOB_TYPE_META = {
 /** 视图所属任务模块（用于侧栏高亮分组） */
 const VIEW_MODULE = {
   jobs: "jobs",
+  datasets: "datasets",
+  "dataset-search": "datasets",
   create: "annotate",
   detail: "annotate",
   templates: "prompt",
   "prompt-debug": "prompt",
-  "data-clean": "clean",
+  "prompt-templates": "prompt",
+  "data-clean": "datasets",
   "data-search": "search",
   "data-generate": "generate",
   "llm-mine": "llm-mine",
@@ -275,31 +281,82 @@ function showView(name) {
 
   const mod = VIEW_MODULE[name] || VIEW_MODULE[navView];
   if (mod) {
-    document
-      .querySelector(`.sidenav-group[data-module="${mod}"]`)
-      ?.classList.add("is-active");
+    const activeGroup = document.querySelector(
+      `.sidenav-group[data-module="${mod}"]`
+    );
+    activeGroup?.classList.add("is-active");
+    // 进入某模块时自动展开其二级标签
+    if (activeGroup) setSidenavGroupOpen(activeGroup, true);
   }
 
   if (name === "settings") {
     const s = document.getElementById("btn-settings");
     if (s) s.classList.add("active");
   }
+  // 顶栏 Job 列表按钮高亮
+  const btnJobs = document.getElementById("btn-jobs");
+  if (btnJobs) {
+    btnJobs.classList.toggle("active", name === "jobs");
+  }
 
   const title = document.getElementById("topbar-title");
   if (title) title.textContent = VIEW_TITLES[name] || name;
 
-  // 顶栏「返回列表」：标注详情 / 提示词调试工作台
+  // 顶栏「返回列表」：仅提示词调试工作台（标注详情用顶栏 Job 列表，避免重复）
   const btnBack = document.getElementById("btn-back");
   if (btnBack) {
-    btnBack.hidden = name !== "detail" && name !== "prompt-debug";
+    btnBack.hidden = name !== "prompt-debug";
   }
 }
 
 function goView(v) {
-  if (v === "jobs" || v === "create" || v === "templates") {
+  // 数据标注：不再展示模板/历史任务页，直接进入标注详情
+  if (v === "create") {
+    enterAnnotationWorkbench().catch((e) => toast(e.message, true));
+    return;
+  }
+  if (v === "jobs" || v === "templates") {
     loadJobs().catch((e) => toast(e.message, true));
   }
+  if (v === "datasets") {
+    loadManagedDatasets().catch((e) => toast(e.message, true));
+  }
+  if (v === "dataset-search") {
+    initDatasetSearchPage().catch((e) => toast(e.message, true));
+  }
+  if (v === "prompt-templates") {
+    loadPromptTemplateLibrary().catch((e) => toast(e.message, true));
+  }
+  if (v === "data-clean") {
+    initDataCleanPage().catch((e) => toast(e.message, true));
+  }
   showView(v);
+}
+
+/**
+ * 进入数据标注工作台：新建空白标注 Job 并打开详情页。
+ * （历史任务请从顶栏「Job 列表」恢复）
+ */
+async function enterAnnotationWorkbench() {
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const job = await api("/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: `数据标注 ${stamp}`,
+      job_type: "annotation",
+      policy_rules: "（请填写风控细则 / 初始 Prompt）",
+      target_accuracy: 1.0,
+      max_gold_iterations: 3,
+    }),
+  });
+  toast(`已创建标注任务 #${job.id}`);
+  try {
+    await loadJobs();
+  } catch (_) {
+    /* ignore */
+  }
+  await openJob(job.id);
 }
 
 document.querySelectorAll(".sidenav-item").forEach((btn) => {
@@ -317,18 +374,63 @@ document.querySelectorAll("[data-goto]").forEach((btn) => {
   });
 });
 
-// 收起导航时：点击分组图标打开该组第一个入口
+/** 一级标签展开/收起二级 */
+function setSidenavGroupOpen(group, open) {
+  if (!group) return;
+  group.classList.toggle("is-open", !!open);
+  const head = group.querySelector(".sidenav-group-head");
+  if (head) head.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function toggleSidenavGroup(group) {
+  if (!group) return;
+  setSidenavGroupOpen(group, !group.classList.contains("is-open"));
+}
+
+// 展开态：点一级标签切换二级收起/展开
+// 收起态（窄导航）：点分组打开该组第一个入口
 document.querySelectorAll(".sidenav-group").forEach((group) => {
+  const head = group.querySelector(".sidenav-group-head");
+  if (head) {
+    head.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const sn = document.getElementById("sidenav");
+      if (sn?.classList.contains("collapsed")) {
+        const first = group.querySelector(".sidenav-item[data-view]");
+        if (first?.dataset.view) goView(first.dataset.view);
+        return;
+      }
+      toggleSidenavGroup(group);
+    });
+    head.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      head.click();
+    });
+  }
   group.addEventListener("click", (e) => {
     const sn = document.getElementById("sidenav");
     if (!sn?.classList.contains("collapsed")) return;
     // 已点到子项则交给子项处理
     if (e.target.closest(".sidenav-item")) return;
+    if (e.target.closest(".sidenav-group-head")) return;
     const first = group.querySelector(".sidenav-item[data-view]");
     if (first?.dataset.view) goView(first.dataset.view);
   });
 });
 
+// 初始：默认收起全部带二级的分组；当前激活模块展开
+(function initSidenavGroups() {
+  document.querySelectorAll(".sidenav-group").forEach((g) => {
+    if (!g.querySelector(".sidenav-group-head")) return;
+    setSidenavGroupOpen(g, g.classList.contains("is-active"));
+  });
+})();
+
+document.getElementById("btn-jobs")?.addEventListener("click", () => {
+  goView("jobs");
+});
 document.getElementById("btn-settings")?.addEventListener("click", () => {
   goView("settings");
   syncThemeRadios();
@@ -665,21 +767,9 @@ function renderJobsTable(el, jobs, typeKey, opts = {}) {
 }
 
 function renderCreateAnnotationJobsTable() {
-  const qEl = document.getElementById("create-jobs-q");
-  if (qEl && document.activeElement !== qEl && qEl.value !== createJobsQuery) {
-    qEl.value = createJobsQuery;
-  }
-  renderJobsTable(
-    document.getElementById("create-jobs-table"),
-    cachedJobsList,
-    "annotation",
-    {
-      compact: true,
-      textQuery: createJobsQuery,
-      emptyHint:
-        "<p class='hint'>暂无数据标注任务。请在上方「从模板导入新任务」创建。</p>",
-    }
-  );
+  // 数据标注页已取消历史任务列表；保留空实现以免 loadJobs 报错
+  const el = document.getElementById("create-jobs-table");
+  if (!el) return;
 }
 
 /** 模板库页 · 提示词调试任务搜索关键词 */
@@ -703,7 +793,7 @@ function renderPromptDebugJobsTable() {
       compact: true,
       textQuery: promptDebugJobsQuery,
       emptyHint:
-        "<p class='hint'>暂无任务。点击「新建」创建。</p>",
+        "<p class='hint'>暂无任务。点击「新建」进入工作台，保存版本后才会出现在此列表。</p>",
     }
   );
 }
@@ -758,19 +848,18 @@ document.getElementById("prompt-debug-jobs-q")?.addEventListener("keydown", (e) 
   }
 });
 
-document.getElementById("btn-new-prompt-debug")?.addEventListener("click", () => {
-  const nameInput = document.getElementById("prompt-debug-new-name");
-  const name = (nameInput?.value || "").trim();
-  createTypedJob("prompt_debug", { name })
-    .then(() => {
-      if (nameInput) nameInput.value = "";
-    })
-    .catch((e) => toast(e.message, true));
-});
-document.getElementById("prompt-debug-new-name")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    document.getElementById("btn-new-prompt-debug")?.click();
+// 提示词调试 · 新建：进入草稿（不弹名称、不调创建接口）
+// 使用 document 委托，避免脚本执行时机 / 缓存旧绑定导致仍走 createTypedJob
+document.addEventListener("click", (e) => {
+  const btn = e.target?.closest?.("#btn-new-prompt-debug");
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    openPromptDebugDraft();
+  } catch (err) {
+    console.error(err);
+    toast(err?.message || String(err), true);
   }
 });
 
@@ -1046,11 +1135,205 @@ async function openJob(id) {
 let pdVersionsCache = [];
 let pdOpenDiffVer = null;
 let pdOpenReasonVer = null;
+/** 未落库的新建草稿（点「新建」进入，保存版本时才创建 Job + 写名称） */
+let pdDraftMode = false;
+/** 已落库任务名称（SQL jobs.name） */
+let pdLoadedJobName = "";
+/** 草稿态展示的默认名称（稳定，不随每次渲染变） */
+let pdDraftDefaultName = "";
+/** 名称弹窗回调 resolve(null | string) */
+let pdNameModalResolve = null;
 
 function formatPdTime(iso) {
   if (!iso) return "";
   return String(iso).replace("T", " ").slice(0, 19);
 }
+
+function defaultPromptDebugName() {
+  return `提示词调试 ${new Date()
+    .toISOString()
+    .slice(0, 16)
+    .replace("T", " ")}`;
+}
+
+/**
+ * 刷新工作台顶部名称展示（纯文本，非输入框）。
+ * 草稿：显示默认名；已保存：显示 SQL 中的 jobs.name
+ */
+function updatePdNameDisplay() {
+  const nameText = document.getElementById("pd-job-name-text");
+  const renameBtn = document.getElementById("btn-pd-rename");
+  const meta = document.getElementById("pd-job-meta");
+  if (!nameText) return;
+
+  if (!currentJobId || pdDraftMode) {
+    const shown = pdDraftDefaultName || defaultPromptDebugName();
+    pdDraftDefaultName = shown;
+    nameText.textContent = shown;
+    nameText.classList.add("is-draft");
+    nameText.classList.remove("is-clickable");
+    nameText.title = "保存版本时将弹出名称设置（可改，可留空用默认）";
+    if (renameBtn) renameBtn.hidden = true;
+    if (meta) meta.textContent = "未保存草稿 · 保存版本后才会写入数据库";
+    return;
+  }
+
+  const shown = (pdLoadedJobName || "").trim() || defaultPromptDebugName();
+  nameText.textContent = shown;
+  nameText.classList.remove("is-draft");
+  nameText.classList.add("is-clickable");
+  nameText.title = "点击修改任务名称";
+  if (renameBtn) renameBtn.hidden = false;
+  if (meta) {
+    meta.textContent = currentJobId
+      ? `#${currentJobId} · 名称已保存`
+      : "—";
+  }
+}
+
+/**
+ * 弹出任务名称设置框。
+ * @param {{ title?: string, defaultName: string, confirmLabel?: string, hint?: string }} opts
+ * @returns {Promise<string|null>} 确认后返回最终名称；取消返回 null
+ */
+function askPromptDebugJobName(opts) {
+  const modal = document.getElementById("pd-name-modal");
+  const form = document.getElementById("form-pd-name");
+  const input = document.getElementById("pd-name-modal-input");
+  const titleEl = document.getElementById("pd-name-modal-title");
+  const hintEl = document.getElementById("pd-name-modal-hint");
+  const defEl = document.getElementById("pd-name-modal-default");
+  const okBtn = document.getElementById("pd-name-modal-ok");
+  if (!modal || !form || !input) {
+    // 兜底：无弹层时直接用默认名
+    return Promise.resolve((opts.defaultName || defaultPromptDebugName()).trim());
+  }
+
+  // 若已有未完成弹窗，先取消
+  if (pdNameModalResolve) {
+    const prev = pdNameModalResolve;
+    pdNameModalResolve = null;
+    prev(null);
+  }
+
+  const defaultName = (opts.defaultName || defaultPromptDebugName()).trim();
+  if (titleEl) titleEl.textContent = opts.title || "设置任务名称";
+  if (hintEl) {
+    hintEl.textContent =
+      opts.hint || "留空则使用默认名称；名称写入数据库（可改、可删）";
+  }
+  if (defEl) defEl.textContent = defaultName;
+  if (okBtn) okBtn.textContent = opts.confirmLabel || "确认保存";
+  input.value = "";
+  input.placeholder = defaultName;
+  input.dataset.defaultName = defaultName;
+  modal.hidden = false;
+  setTimeout(() => {
+    input.focus();
+    input.select?.();
+  }, 30);
+
+  return new Promise((resolve) => {
+    pdNameModalResolve = resolve;
+  });
+}
+
+function closePdNameModal(result) {
+  const modal = document.getElementById("pd-name-modal");
+  if (modal) modal.hidden = true;
+  const resolve = pdNameModalResolve;
+  pdNameModalResolve = null;
+  if (resolve) resolve(result);
+}
+
+document.getElementById("form-pd-name")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = document.getElementById("pd-name-modal-input");
+  const typed = (input?.value || "").trim();
+  const fallback =
+    (input?.dataset.defaultName || "").trim() || defaultPromptDebugName();
+  closePdNameModal(typed || fallback);
+});
+
+document.getElementById("pd-name-modal-cancel")?.addEventListener("click", () => {
+  closePdNameModal(null);
+});
+
+document.getElementById("pd-name-modal")?.addEventListener("click", (e) => {
+  if (e.target?.id === "pd-name-modal") closePdNameModal(null);
+});
+
+/**
+ * 新建：不调 API，直接进入空工作台草稿（名称仅展示默认文本）。
+ */
+function openPromptDebugDraft() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  currentJobId = null;
+  pdDraftMode = true;
+  pdLoadedJobName = "";
+  pdDraftDefaultName = defaultPromptDebugName();
+  pdVersionsCache = [];
+  collapsePdDiff();
+  collapsePdReasonExpand();
+
+  const verEl = document.getElementById("pd-active-ver");
+  const editor = document.getElementById("pd-prompt-editor");
+  const reasonEl = document.getElementById("pd-change-reason");
+  if (verEl) verEl.textContent = "尚未创建版本";
+  if (editor) {
+    editor.value = "";
+    editor.dataset.dirty = "0";
+    editor.dataset.loadedVersion = "";
+  }
+  if (reasonEl) {
+    reasonEl.value = "";
+    reasonEl.dataset.dirty = "0";
+  }
+  updatePdNameDisplay();
+  renderPromptDebugHistory([]);
+  showView("prompt-debug");
+}
+
+/**
+ * 改名：更新 SQL jobs.name
+ */
+async function renamePromptDebugJob() {
+  if (!currentJobId || pdDraftMode) {
+    toast("请先保存版本创建任务后再改名", true);
+    return;
+  }
+  const name = await askPromptDebugJobName({
+    title: "修改任务名称",
+    defaultName: pdLoadedJobName || defaultPromptDebugName(),
+    confirmLabel: "保存名称",
+    hint: "留空则使用默认名称；修改后写入数据库",
+  });
+  if (name == null) return;
+  try {
+    const job = await api(`/jobs/${currentJobId}/name`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    pdLoadedJobName = (job.name || name).trim();
+    updatePdNameDisplay();
+    toast("任务名称已更新");
+    loadJobs().catch(() => {});
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById("btn-pd-rename")?.addEventListener("click", () => {
+  renamePromptDebugJob().catch((e) => toast(e.message, true));
+});
+document.getElementById("pd-job-name-text")?.addEventListener("click", () => {
+  if (!currentJobId || pdDraftMode) return;
+  renamePromptDebugJob().catch((e) => toast(e.message, true));
+});
 
 function renderDiffLinesHtml(diffText) {
   return String(diffText || "(与上一版无差异或为第一版)")
@@ -1215,15 +1498,22 @@ function openPdReasonExpand(ver, fullText) {
 }
 
 async function loadPromptDebugWorkbench(job) {
-  const meta = document.getElementById("pd-job-meta");
   const verEl = document.getElementById("pd-active-ver");
   const editor = document.getElementById("pd-prompt-editor");
   const reasonEl = document.getElementById("pd-change-reason");
-  if (!currentJobId) return;
+  if (!currentJobId) {
+    // 草稿态由 openPromptDebugDraft 负责
+    return;
+  }
 
+  pdDraftMode = false;
   const j = job || (await api(`/jobs/${currentJobId}`));
+  pdLoadedJobName = (j.name || "").trim();
+  pdDraftDefaultName = "";
+  updatePdNameDisplay();
+  const meta = document.getElementById("pd-job-meta");
   if (meta) {
-    meta.textContent = `#${j.id}${j.name ? ` · ${j.name}` : ""} · ${j.status || "—"}`;
+    meta.textContent = `#${j.id} · ${j.status || "—"}`;
   }
 
   const versions = await api(`/jobs/${currentJobId}/prompt-versions`);
@@ -1492,11 +1782,2755 @@ document.getElementById("btn-pd-hide-diff")?.addEventListener("click", () => {
   collapsePdDiff();
 });
 
-document.getElementById("btn-pd-back")?.addEventListener("click", () => {
-  currentJobId = null;
-  collapsePdDiff();
-  collapsePdReasonExpand();
-  goView("templates");
+/** ---------- 提示词调试 · 导入模板 ---------- */
+let pdTmplSearchTimer = null;
+
+function closePdTmplModal() {
+  const modal = document.getElementById("pd-tmpl-modal");
+  if (modal) modal.hidden = true;
+}
+
+async function renderPdTemplateList(keyword) {
+  const listEl = document.getElementById("pd-tmpl-list");
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="pd-tmpl-empty">加载中…</div>`;
+  try {
+    const q = (keyword || "").trim();
+    const path = q
+      ? `/templates?q=${encodeURIComponent(q)}`
+      : `/templates`;
+    const list = await api(path);
+    if (!list || !list.length) {
+      listEl.innerHTML = `<div class="pd-tmpl-empty">暂无模板${
+        q ? "匹配" : ""
+      }。请先在模板库沉淀提示词。</div>`;
+      return;
+    }
+    listEl.innerHTML = list
+      .map(
+        (t) => `<div class="pd-tmpl-item" data-tid="${t.id}" role="option" title="点击导入到编辑器">
+        <div class="pti-name">#${t.id} ${escapeHtml(t.name || "未命名")}</div>
+        <div class="pti-meta">分类 ${escapeHtml(t.category || "-")} · 激活 v${
+          t.current_version || 1
+        } · 使用 ${t.usage_count || 0}</div>
+      </div>`
+      )
+      .join("");
+    listEl.querySelectorAll(".pd-tmpl-item[data-tid]").forEach((el) => {
+      el.addEventListener("click", async () => {
+        if (el.dataset.busy === "1") return;
+        el.dataset.busy = "1";
+        try {
+          await importTemplateIntoPromptDebug(+el.dataset.tid);
+        } catch (err) {
+          toast(err.message || "导入失败", true);
+        } finally {
+          el.dataset.busy = "0";
+        }
+      });
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="pd-tmpl-empty">${escapeHtml(
+      e.message || "加载失败"
+    )}</div>`;
+  }
+}
+
+/**
+ * 将模板激活版正文写入提示词编辑器（不建 Job、不自动保存版本）。
+ */
+async function importTemplateIntoPromptDebug(templateId) {
+  const tid = +templateId;
+  if (!tid) throw new Error("请选择模板");
+  const t = await api(`/templates/${tid}`);
+  const text = (t.prompt_text || "").trim();
+  if (!text) throw new Error("该模板激活版正文为空，无法导入");
+
+  const editor = document.getElementById("pd-prompt-editor");
+  const reasonEl = document.getElementById("pd-change-reason");
+  if (editor) {
+    editor.value = t.prompt_text || "";
+    editor.dataset.dirty = "1";
+  }
+  if (reasonEl) {
+    const name = (t.name || "").trim() || `#${tid}`;
+    reasonEl.value = `从模板 #${tid} ${name}（v${t.current_version || 1}）导入`;
+    reasonEl.dataset.dirty = "1";
+  }
+  closePdTmplModal();
+  toast(`已导入模板 #${tid}「${t.name || ""}」到编辑器，请检查后点「保存版本」`);
+}
+
+async function openPdImportTemplateModal() {
+  const modal = document.getElementById("pd-tmpl-modal");
+  const search = document.getElementById("pd-tmpl-search");
+  if (!modal) {
+    toast("导入模板弹层未就绪", true);
+    return;
+  }
+  if (search) search.value = "";
+  modal.hidden = false;
+  await renderPdTemplateList("");
+  setTimeout(() => search?.focus(), 30);
+}
+
+document.getElementById("btn-pd-import-template")?.addEventListener("click", () => {
+  openPdImportTemplateModal().catch((e) => toast(e.message, true));
+});
+document.getElementById("pd-tmpl-modal-cancel")?.addEventListener("click", () => {
+  closePdTmplModal();
+});
+document.getElementById("pd-tmpl-modal")?.addEventListener("click", (e) => {
+  if (e.target?.id === "pd-tmpl-modal") closePdTmplModal();
+});
+document.getElementById("pd-tmpl-search")?.addEventListener("input", (e) => {
+  const q = e.target.value || "";
+  if (pdTmplSearchTimer) clearTimeout(pdTmplSearchTimer);
+  pdTmplSearchTimer = setTimeout(() => {
+    renderPdTemplateList(q).catch((err) => toast(err.message, true));
+  }, 200);
+});
+document.getElementById("pd-tmpl-search")?.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closePdTmplModal();
+  }
+});
+
+/** ---------- 提示词模板库（二级导航） ---------- */
+let ptLibQuery = "";
+let ptLibSearchTimer = null;
+let ptCurrentId = null;
+let ptLibCache = [];
+/** 打开详情时的快照，用于判断元信息/正文是否有改动 */
+let ptLoadedSnapshot = null;
+
+async function loadPromptTemplateLibrary(selectId) {
+  const listEl = document.getElementById("pt-lib-list");
+  if (!listEl) return;
+  listEl.innerHTML = `<p class="hint" style="padding:12px">加载中…</p>`;
+  try {
+    const q = (ptLibQuery || "").trim();
+    const path = q ? `/templates?q=${encodeURIComponent(q)}` : `/templates`;
+    ptLibCache = (await api(path)) || [];
+    if (!ptLibCache.length) {
+      listEl.innerHTML = `<p class="hint" style="padding:12px">暂无模板。点击「新建模板」创建。</p>`;
+    } else {
+      listEl.innerHTML = ptLibCache
+        .map(
+          (t) => `<div class="pt-lib-item${
+            ptCurrentId === t.id ? " active" : ""
+          }" data-tid="${t.id}">
+          <div class="pli-name">#${t.id} ${escapeHtml(t.name || "未命名")}</div>
+          <div class="pli-meta">分类 ${escapeHtml(
+            t.category || "-"
+          )} · 激活 v${t.current_version || 1} · 使用 ${t.usage_count || 0}</div>
+        </div>`
+        )
+        .join("");
+      listEl.querySelectorAll(".pt-lib-item[data-tid]").forEach((el) => {
+        el.addEventListener("click", () => {
+          openPromptTemplateDetail(+el.dataset.tid).catch((e) =>
+            toast(e.message, true)
+          );
+        });
+      });
+    }
+    const want = selectId != null ? +selectId : ptCurrentId;
+    if (want && ptLibCache.some((t) => t.id === want)) {
+      await openPromptTemplateDetail(want);
+    } else if (!ptCurrentId) {
+      showPromptTemplateDetailEmpty();
+    }
+  } catch (e) {
+    listEl.innerHTML = `<p class="hint" style="padding:12px">${escapeHtml(
+      e.message || "加载失败"
+    )}</p>`;
+  }
+}
+
+function showPromptTemplateDetailEmpty() {
+  ptCurrentId = null;
+  ptLoadedSnapshot = null;
+  const detail = document.getElementById("pt-detail");
+  if (detail) detail.hidden = true;
+  document
+    .querySelectorAll("#pt-lib-list .pt-lib-item")
+    .forEach((el) => el.classList.remove("active"));
+}
+
+function readPromptTemplateForm() {
+  return {
+    name: (document.getElementById("pt-name")?.value || "").trim(),
+    category:
+      (document.getElementById("pt-category")?.value || "general").trim() ||
+      "general",
+    description: (document.getElementById("pt-description")?.value || "").trim(),
+    prompt_text: (document.getElementById("pt-prompt")?.value || "").trim(),
+  };
+}
+
+async function openPromptTemplateDetail(id) {
+  const tid = +id;
+  if (!tid) return;
+  const t = await api(`/templates/${tid}`);
+  const versions = await api(`/templates/${tid}/versions`);
+  ptCurrentId = tid;
+  ptLoadedSnapshot = {
+    name: (t.name || "").trim(),
+    category: (t.category || "general").trim() || "general",
+    description: (t.description || "").trim(),
+    prompt_text: (t.prompt_text || "").trim(),
+  };
+
+  const detail = document.getElementById("pt-detail");
+  if (detail) detail.hidden = false;
+
+  const nameEl = document.getElementById("pt-name");
+  const catEl = document.getElementById("pt-category");
+  const descEl = document.getElementById("pt-description");
+  const promptEl = document.getElementById("pt-prompt");
+  const reasonEl = document.getElementById("pt-change-reason");
+  const metaEl = document.getElementById("pt-meta");
+  if (nameEl) nameEl.value = t.name || "";
+  if (catEl) catEl.value = t.category || "general";
+  if (descEl) descEl.value = t.description || "";
+  if (promptEl) {
+    promptEl.value = t.prompt_text || "";
+    promptEl.dataset.loaded = `${t.current_version}:${(t.prompt_text || "").length}`;
+  }
+  if (reasonEl) reasonEl.value = "";
+  if (metaEl) {
+    metaEl.textContent = `#${t.id} · 激活 v${t.current_version || 1} · 共 ${
+      (versions || []).length
+    } 个版本 · 使用 ${t.usage_count || 0}`;
+  }
+
+  document.querySelectorAll("#pt-lib-list .pt-lib-item").forEach((el) => {
+    el.classList.toggle("active", +el.dataset.tid === tid);
+  });
+
+  const verEl = document.getElementById("pt-versions");
+  if (verEl) {
+    const list = [...(versions || [])].reverse();
+    if (!list.length) {
+      verEl.innerHTML = `<div class="hint" style="padding:8px">暂无版本</div>`;
+    } else {
+      verEl.innerHTML = list
+        .map((v) => {
+          const time = formatPdTime(v.created_at);
+          return `<div class="pt-ver-item${v.is_active ? " active" : ""}">
+            <div>
+              <strong>v${v.version}${v.is_active ? " · 当前" : ""}</strong>
+              <div class="pvi-meta">${escapeHtml(time)} · ${escapeHtml(
+                v.change_reason || "—"
+              )}</div>
+            </div>
+            ${
+              v.is_active
+                ? ""
+                : `<button type="button" class="secondary btn-pt-activate" data-v="${v.version}">激活</button>`
+            }
+          </div>`;
+        })
+        .join("");
+      verEl.querySelectorAll(".btn-pt-activate").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await api(`/templates/${tid}/versions/${btn.dataset.v}/activate`, {
+              method: "POST",
+            });
+            toast(`已激活 v${btn.dataset.v}`);
+            await openPromptTemplateDetail(tid);
+            await loadPromptTemplateLibrary(tid);
+          } catch (e) {
+            toast(e.message, true);
+          }
+        });
+      });
+    }
+  }
+}
+
+document.getElementById("pt-lib-q")?.addEventListener("input", (e) => {
+  ptLibQuery = e.target.value || "";
+  if (ptLibSearchTimer) clearTimeout(ptLibSearchTimer);
+  ptLibSearchTimer = setTimeout(() => {
+    loadPromptTemplateLibrary().catch((err) => toast(err.message, true));
+  }, 200);
+});
+
+document.getElementById("btn-pt-new")?.addEventListener("click", async () => {
+  const name = window.prompt("新建模板名称：", `模板 ${new Date().toISOString().slice(0, 10)}`);
+  if (name == null) return;
+  const trimmed = String(name).trim();
+  if (!trimmed) {
+    toast("名称不能为空", true);
+    return;
+  }
+  try {
+    const t = await api("/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: trimmed,
+        category: "general",
+        prompt_text: "（请编辑模板正文）",
+        change_reason: "initial create",
+      }),
+    });
+    toast(`已创建模板 #${t.id}`);
+    ptCurrentId = t.id;
+    await loadPromptTemplateLibrary(t.id);
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+document.getElementById("btn-pt-save-version")?.addEventListener("click", async () => {
+  if (!ptCurrentId) {
+    toast("请先选择或新建模板", true);
+    return;
+  }
+  const form = readPromptTemplateForm();
+  if (!form.name) {
+    toast("模板名称不能为空", true);
+    return;
+  }
+  if (!form.prompt_text) {
+    toast("提示词正文不能为空", true);
+    return;
+  }
+  const snap = ptLoadedSnapshot || {
+    name: "",
+    category: "general",
+    description: "",
+    prompt_text: "",
+  };
+  const metaChanged =
+    form.name !== snap.name ||
+    form.category !== snap.category ||
+    form.description !== snap.description;
+  const bodyChanged = form.prompt_text !== snap.prompt_text;
+
+  if (!metaChanged && !bodyChanged) {
+    toast("没有任何更改，未保存", true);
+    return;
+  }
+
+  const reason =
+    (document.getElementById("pt-change-reason")?.value || "").trim() ||
+    "模板库保存";
+  try {
+    const parts = [];
+    if (metaChanged) {
+      await api(`/templates/${ptCurrentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          category: form.category,
+          description: form.description || null,
+        }),
+      });
+      parts.push("元信息");
+    }
+    let ver = null;
+    if (bodyChanged) {
+      ver = await api(`/templates/${ptCurrentId}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt_text: form.prompt_text,
+          change_reason: reason,
+        }),
+      });
+      parts.push(`正文 v${ver.version}`);
+    }
+    const reasonEl = document.getElementById("pt-change-reason");
+    if (reasonEl) reasonEl.value = "";
+    toast(`已保存：${parts.join(" · ")}`);
+    await openPromptTemplateDetail(ptCurrentId);
+    await loadPromptTemplateLibrary(ptCurrentId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+/** ---------- 数据管理（一级：库 / 检索 / 清洗） ---------- */
+let dsQuery = "";
+let dsQueryTimer = null;
+let dsModalityFilter = "";
+let dsCurrentId = null;
+let dsCache = [];
+
+const DS_MODALITY_LABEL = {
+  text: "文本",
+  image: "图像",
+  audio: "音频",
+  video: "视频",
+};
+
+function renderDsPreview(preview) {
+  const head = document.getElementById("ds-preview-head");
+  const body = document.getElementById("ds-preview-body");
+  if (!head || !body) return;
+  const rows = preview || [];
+  if (!rows.length) {
+    head.innerHTML = "";
+    body.innerHTML = `<tr><td class="hint">暂无预览（未上传或为空）</td></tr>`;
+    return;
+  }
+  const cols = Object.keys(rows[0]);
+  head.innerHTML = `<tr>${cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
+  body.innerHTML = rows
+    .map(
+      (r) =>
+        `<tr>${cols
+          .map((c) => {
+            const v = r[c];
+            const s = v == null ? "" : String(v);
+            return `<td title="${escapeHtml(s)}">${escapeHtml(
+              s.length > 80 ? s.slice(0, 80) + "…" : s
+            )}</td>`;
+          })
+          .join("")}</tr>`
+    )
+    .join("");
+}
+
+function resetDsCreateColmap() {
+  const wrap = document.getElementById("ds-create-colmap");
+  const idSel = document.getElementById("ds-create-id-column");
+  const textSel = document.getElementById("ds-create-text-column");
+  const meta = document.getElementById("ds-create-inspect-meta");
+  const prevWrap = document.getElementById("ds-create-preview-wrap");
+  if (wrap) wrap.hidden = true;
+  if (idSel) idSel.innerHTML = `<option value="">（不使用 ID 列）</option>`;
+  if (textSel) {
+    textSel.innerHTML = "";
+    textSel.required = false;
+  }
+  if (meta) meta.textContent = "";
+  if (prevWrap) prevWrap.hidden = true;
+  const head = document.getElementById("ds-create-preview-head");
+  const body = document.getElementById("ds-create-preview-body");
+  if (head) head.innerHTML = "";
+  if (body) body.innerHTML = "";
+}
+
+function fillDsCreateColmap(info) {
+  const wrap = document.getElementById("ds-create-colmap");
+  const idSel = document.getElementById("ds-create-id-column");
+  const textSel = document.getElementById("ds-create-text-column");
+  const meta = document.getElementById("ds-create-inspect-meta");
+  const prevWrap = document.getElementById("ds-create-preview-wrap");
+  const cols = Array.isArray(info?.columns) ? info.columns.map(String) : [];
+  if (!wrap || !idSel || !textSel) return;
+  if (!cols.length) {
+    resetDsCreateColmap();
+    toast(info?.error_message || "未能识别列", true);
+    return;
+  }
+  const idVal = info.id_column && cols.includes(String(info.id_column)) ? String(info.id_column) : "";
+  const textVal =
+    info.text_column && cols.includes(String(info.text_column))
+      ? String(info.text_column)
+      : cols[0];
+  idSel.innerHTML =
+    `<option value="">（不使用 ID 列）</option>` +
+    cols
+      .map(
+        (c) =>
+          `<option value="${escapeHtml(c)}"${c === idVal ? " selected" : ""}>${escapeHtml(
+            c
+          )}</option>`
+      )
+      .join("");
+  textSel.innerHTML = cols
+    .map(
+      (c) =>
+        `<option value="${escapeHtml(c)}"${c === textVal ? " selected" : ""}>${escapeHtml(
+          c
+        )}</option>`
+    )
+    .join("");
+  textSel.required = true;
+  if (meta) {
+    meta.textContent = `${info.row_count || 0} 行 · ${info.column_count || cols.length} 列 · 请确认 id / text 列后创建`;
+  }
+  // 预览原始表
+  const head = document.getElementById("ds-create-preview-head");
+  const body = document.getElementById("ds-create-preview-body");
+  const rows = info.preview || [];
+  if (prevWrap && head && body) {
+    if (rows.length) {
+      prevWrap.hidden = false;
+      head.innerHTML = `<tr>${cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
+      body.innerHTML = rows
+        .map(
+          (r) =>
+            `<tr>${cols
+              .map((c) => {
+                const v = r[c];
+                const s = v == null ? "" : String(v);
+                return `<td title="${escapeHtml(s)}">${escapeHtml(
+                  s.length > 60 ? s.slice(0, 60) + "…" : s
+                )}</td>`;
+              })
+              .join("")}</tr>`
+        )
+        .join("");
+    } else {
+      prevWrap.hidden = true;
+    }
+  }
+  wrap.hidden = false;
+}
+
+function showDsDetailEmpty() {
+  dsCurrentId = null;
+  const detail = document.getElementById("ds-detail");
+  if (detail) detail.hidden = true;
+  document
+    .querySelectorAll("#ds-list .ds-item")
+    .forEach((el) => el.classList.remove("active"));
+}
+
+async function loadManagedDatasets(selectId) {
+  const listEl = document.getElementById("ds-list");
+  if (!listEl) return;
+  listEl.innerHTML = `<p class="hint" style="padding:12px">加载中…</p>`;
+  try {
+    const params = new URLSearchParams();
+    if (dsQuery.trim()) params.set("q", dsQuery.trim());
+    if (dsModalityFilter) params.set("modality", dsModalityFilter);
+    const qs = params.toString();
+    dsCache = (await api(`/datasets${qs ? `?${qs}` : ""}`)) || [];
+    if (!dsCache.length) {
+      listEl.innerHTML = `<p class="hint" style="padding:12px">暂无数据集。点击「新建」创建。</p>`;
+    } else {
+      listEl.innerHTML = dsCache
+        .map((d) => {
+          const mod = DS_MODALITY_LABEL[d.modality] || d.modality || "—";
+          return `<div class="ds-item${dsCurrentId === d.id ? " active" : ""}" data-id="${d.id}">
+            <div class="dsi-name">#${d.id} ${escapeHtml(d.name || "未命名")}</div>
+            <div class="dsi-meta">${escapeHtml(mod)} · ${d.file_format || "—"} · ${
+              d.row_count || 0
+            } 行 · ${escapeHtml(d.status || "—")}</div>
+          </div>`;
+        })
+        .join("");
+      listEl.querySelectorAll(".ds-item[data-id]").forEach((el) => {
+        el.addEventListener("click", () => {
+          openManagedDataset(+el.dataset.id).catch((e) => toast(e.message, true));
+        });
+      });
+    }
+    const want = selectId != null ? +selectId : dsCurrentId;
+    if (want && dsCache.some((d) => d.id === want)) {
+      await openManagedDataset(want);
+    } else if (!dsCurrentId) {
+      showDsDetailEmpty();
+    }
+  } catch (e) {
+    listEl.innerHTML = `<p class="hint" style="padding:12px">${escapeHtml(
+      e.message || "加载失败"
+    )}</p>`;
+  }
+}
+
+async function openManagedDataset(id) {
+  const tid = +id;
+  if (!tid) return;
+  const d = await api(`/datasets/${tid}?preview=true`);
+  dsCurrentId = tid;
+  const detail = document.getElementById("ds-detail");
+  if (detail) detail.hidden = false;
+
+  const nameEl = document.getElementById("ds-name");
+  const descEl = document.getElementById("ds-description");
+  const metaEl = document.getElementById("ds-meta");
+  const fileLabel = document.getElementById("ds-file-label");
+  const trainPaths = document.getElementById("ds-train-paths");
+  const btnDl = document.getElementById("btn-ds-download");
+
+  if (nameEl) nameEl.value = d.name || "";
+  if (descEl) descEl.value = d.description || "";
+  if (metaEl) {
+    const vec = d.vector_ready ? `向量就绪 d=${d.vector_dim || "—"}` : "向量未建";
+    metaEl.textContent = `#${d.id} · 存储 ${d.storage || "files"} · ${
+      d.row_count || 0
+    } 行 · ${vec} · ${d.status || "—"}`;
+  }
+  if (fileLabel) {
+    fileLabel.textContent = d.has_file
+      ? `${d.original_filename || "训练包"} · ${d.row_count || 0} 条 · JSONL+CSV`
+      : "无训练数据";
+  }
+  if (trainPaths) {
+    trainPaths.textContent = d.has_file
+      ? `训练入口：data.jsonl（推荐） · data.csv · media/ · vectors/`
+      : "—";
+    if (d.train_paths?.jsonl) trainPaths.title = d.train_paths.jsonl;
+  }
+  if (btnDl) btnDl.disabled = !d.has_file;
+  if (d.status === "error" && d.error_message) {
+    toast(d.error_message, true);
+  }
+  renderDsPreview(d.preview || []);
+  document.querySelectorAll("#ds-list .ds-item").forEach((el) => {
+    el.classList.toggle("active", +el.dataset.id === tid);
+  });
+}
+
+/** ---------- 数据检索（数据管理 · 二级） ---------- */
+let dssDatasetCache = [];
+let dssDsQuery = "";
+let dssDsQueryTimer = null;
+let dssCurrentId = null;
+/** @type {{ mode: string, hits: any[], total: number, query?: string }} */
+let dssResultState = { mode: "browse", hits: [], total: 0 };
+let dssPage = 1;
+let dssPageSize = 50;
+
+function dssSetHidden(el, hide) {
+  if (!el) return;
+  if (hide) {
+    el.hidden = true;
+    el.setAttribute("hidden", "");
+    el.style.display = "none";
+  } else {
+    el.hidden = false;
+    el.removeAttribute("hidden");
+    el.style.display = "";
+  }
+}
+
+function dssUpdateModeUI() {
+  const mode = document.getElementById("dss-mode")?.value || "keywords";
+  const matchOpt = document.getElementById("dss-options-match");
+  const vecOpt = document.getElementById("dss-options-vector");
+  const label = document.getElementById("dss-query-label");
+  const ta = document.getElementById("dss-query");
+  const isVec = mode === "vector" || mode === "vector_fast";
+  // 命中任一/全部 + 区分大小写：仅关键词
+  dssSetHidden(matchOpt, mode !== "keywords");
+  dssSetHidden(vecOpt, !isVec);
+  // 查询框标签统一为「检索条件」，仅切换 placeholder 提示
+  if (label) label.textContent = "检索条件";
+  if (mode === "keywords") {
+    if (ta) ta.placeholder = "多个关键词用空格或逗号分隔，例如：作业 孩子";
+  } else if (mode === "regex") {
+    if (ta) ta.placeholder = "例如：作业.{0,12}课外|写完了（OR 用 |，AND 用 (?=.*a)(?=.*b)）";
+  } else if (mode === "vector_fast") {
+    if (ta) ta.placeholder = "偏字面相关的快速向量检索…";
+  } else {
+    if (ta) ta.placeholder = "语义相近检索，例如：小孩做完功课可以看课外书吗";
+  }
+  dssRefreshVectorMeta();
+}
+
+function dssRefreshVectorMeta() {
+  const meta = document.getElementById("dss-vector-meta");
+  if (!meta) return;
+  const d = dssDatasetCache.find((x) => x.id === dssCurrentId);
+  if (!d) {
+    meta.textContent = "请先选择数据集";
+    return;
+  }
+  meta.textContent = d.vector_ready
+    ? `索引就绪 · ${d.vector_model || "—"} · dim=${d.vector_dim || "—"} · n=${
+        d.vector_count || 0
+      }`
+    : "尚未构建向量索引（可点「重建向量索引」）";
+}
+
+function dssTotalPages() {
+  const total = dssResultState.total || 0;
+  const size = dssPageSize || 50;
+  if (total <= 0) return 1;
+  return Math.max(1, Math.ceil(total / size));
+}
+
+function renderDssPager() {
+  const pager = document.getElementById("dss-pager");
+  const info = document.getElementById("dss-page-info");
+  const prev = document.getElementById("dss-page-prev");
+  const next = document.getElementById("dss-page-next");
+  const sizeSel = document.getElementById("dss-page-size");
+  if (!pager) return;
+  const total = dssResultState.total || 0;
+  const pages = dssTotalPages();
+  if (total <= 0) {
+    pager.hidden = true;
+    return;
+  }
+  pager.hidden = false;
+  if (dssPage > pages) dssPage = pages;
+  if (dssPage < 1) dssPage = 1;
+  if (info) info.textContent = `第 ${dssPage} / ${pages} 页 · 共 ${total} 条`;
+  if (prev) prev.disabled = dssPage <= 1;
+  if (next) next.disabled = dssPage >= pages;
+  if (sizeSel && String(sizeSel.value) !== String(dssPageSize)) {
+    sizeSel.value = String(dssPageSize);
+  }
+}
+
+async function dssGoPage(page) {
+  const pages = dssTotalPages();
+  dssPage = Math.min(Math.max(1, page), pages);
+  if (dssResultState.mode === "browse") {
+    await loadDssBrowsePage();
+  } else {
+    renderDssResultsPage();
+  }
+}
+
+function renderDssResultsPage() {
+  const head = document.getElementById("dss-result-head");
+  const body = document.getElementById("dss-result-body");
+  const countEl = document.getElementById("dss-result-count");
+  const titleEl = document.getElementById("dss-result-title");
+  const badgeEl = document.getElementById("dss-result-badge");
+  if (!head || !body) return;
+
+  const mode = dssResultState.mode || "browse";
+  // browse 使用服务端分页，由 loadDssBrowsePage 渲染
+  if (mode === "browse" && dssResultState._serverPage) {
+    return;
+  }
+  const allHits = dssResultState.hits || [];
+  const total = dssResultState.total || allHits.length;
+  const size = dssPageSize || 50;
+  const pages = Math.max(1, Math.ceil(total / size) || 1);
+  if (dssPage > pages) dssPage = pages;
+  if (dssPage < 1) dssPage = 1;
+  const start = (dssPage - 1) * size;
+  const hits = allHits.slice(start, start + size);
+
+  if (titleEl) {
+    titleEl.textContent =
+      mode === "browse"
+        ? "数据集内容"
+        : mode === "vector"
+          ? "向量检索结果"
+          : "检索结果";
+  }
+  if (badgeEl) {
+    if (mode === "browse") {
+      badgeEl.textContent = "默认（无规则）";
+      badgeEl.className = "dss-badge dss-badge-default";
+    } else if (mode === "keywords") {
+      badgeEl.textContent = "关键词";
+      badgeEl.className = "dss-badge";
+    } else if (mode === "regex") {
+      badgeEl.textContent = "正则";
+      badgeEl.className = "dss-badge";
+    } else if (mode === "vector_fast") {
+      badgeEl.textContent = "快速向量(TF-IDF)";
+      badgeEl.className = "dss-badge";
+    } else {
+      badgeEl.textContent = "语义向量(BGE)";
+      badgeEl.className = "dss-badge";
+    }
+  }
+  if (countEl) {
+    if (total === 0) {
+      countEl.textContent = "（0 条）";
+    } else {
+      const from = start + 1;
+      const to = Math.min(start + hits.length, total);
+      countEl.textContent = `（${from}–${to} / 共 ${total} 条）`;
+    }
+  }
+
+  if (!hits.length) {
+    head.innerHTML = "";
+    body.innerHTML = `<tr><td class="hint">${
+      mode === "browse" ? "数据集为空" : "无匹配结果"
+    }</td></tr>`;
+    renderDssPager();
+    return;
+  }
+
+  if (mode === "keywords") {
+    head.innerHTML = `<tr><th>#</th><th>score</th><th>命中词</th><th>id</th><th>text</th></tr>`;
+    body.innerHTML = hits
+      .map((r, i) => {
+        const text = r.text == null ? "" : String(r.text);
+        const mks = (r.matched_keywords || []).join("、");
+        const score = typeof r.score === "number" ? r.score.toFixed(3) : "—";
+        const rowNo = start + i + 1;
+        return `<tr>
+          <td>${rowNo}</td>
+          <td>${score}</td>
+          <td>${escapeHtml(mks)}</td>
+          <td>${escapeHtml(r.id == null ? "" : String(r.id))}</td>
+          <td title="${escapeHtml(text)}">${escapeHtml(
+            text.length > 160 ? text.slice(0, 160) + "…" : text
+          )}</td>
+        </tr>`;
+      })
+      .join("");
+  } else if (mode === "regex") {
+    head.innerHTML = `<tr><th>#</th><th>匹配片段</th><th>id</th><th>text</th></tr>`;
+    body.innerHTML = hits
+      .map((r, i) => {
+        const text = r.text == null ? "" : String(r.text);
+        const rowNo = start + i + 1;
+        return `<tr>
+          <td>${rowNo}</td>
+          <td>${escapeHtml(r.match_text || "")}</td>
+          <td>${escapeHtml(r.id == null ? "" : String(r.id))}</td>
+          <td title="${escapeHtml(text)}">${escapeHtml(
+            text.length > 160 ? text.slice(0, 160) + "…" : text
+          )}</td>
+        </tr>`;
+      })
+      .join("");
+  } else if (mode === "vector" || mode === "vector_fast") {
+    head.innerHTML = `<tr><th>#</th><th>score</th><th>cosine</th><th>类型</th><th>id</th><th>text</th></tr>`;
+    body.innerHTML = hits
+      .map((r, i) => {
+        const text = r.text == null ? "" : String(r.text);
+        const score = typeof r.score === "number" ? r.score.toFixed(4) : "—";
+        const cos =
+          typeof r.cosine === "number" ? r.cosine.toFixed(4) : score;
+        const kindLabel =
+          r.index_label ||
+          (mode === "vector_fast" ? "快速向量(TF-IDF)" : "语义向量(BGE)");
+        const rowNo = start + i + 1;
+        return `<tr>
+          <td>${rowNo}</td>
+          <td>${score}</td>
+          <td>${cos}</td>
+          <td>${escapeHtml(kindLabel)}</td>
+          <td>${escapeHtml(r.id == null ? "" : String(r.id))}</td>
+          <td title="${escapeHtml(text)}">${escapeHtml(
+            text.length > 160 ? text.slice(0, 160) + "…" : text
+          )}</td>
+        </tr>`;
+      })
+      .join("");
+  } else {
+    // browse：默认（无规则）
+    head.innerHTML = `<tr><th>#</th><th>id</th><th>text</th></tr>`;
+    body.innerHTML = hits
+      .map((r, i) => {
+        const text = r.text == null ? "" : String(r.text);
+        const rowNo = r.rank ?? r.seq ?? start + i + 1;
+        return `<tr>
+          <td>${rowNo}</td>
+          <td>${escapeHtml(r.id == null ? "" : String(r.id))}</td>
+          <td title="${escapeHtml(text)}">${escapeHtml(
+            text.length > 200 ? text.slice(0, 200) + "…" : text
+          )}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+  renderDssPager();
+}
+
+/** 兼容旧调用名 */
+function renderDssResults(res) {
+  const hits = res?.hits || [];
+  dssResultState = {
+    mode: res?.mode || "browse",
+    hits,
+    total: typeof res?.total === "number" ? res.total : hits.length,
+    query: res?.query,
+  };
+  dssPage = 1;
+  renderDssResultsPage();
+}
+
+async function loadDssBrowsePage() {
+  if (!dssCurrentId) return;
+  const status = document.getElementById("dss-status");
+  if (status) status.textContent = "加载内容…";
+  // 浏览模式：服务端按页拉取（避免一次加载过大）
+  const offset = (dssPage - 1) * dssPageSize;
+  try {
+    let res;
+    try {
+      res = await api(
+        `/datasets/${dssCurrentId}/records?limit=${dssPageSize}&offset=${offset}`
+      );
+    } catch (e1) {
+      // 兼容旧后端无 /records：用详情 preview 兜底
+      const d = await api(`/datasets/${dssCurrentId}?preview=true`);
+      const preview = d.preview || [];
+      const total = d.row_count || preview.length;
+      const hits = preview.map((row, i) => ({
+        rank: i + 1,
+        seq: i + 1,
+        id: row.id ?? row.external_id ?? null,
+        text: row.text ?? row.content ?? Object.values(row)[0],
+      }));
+      res = {
+        mode: "browse",
+        hits,
+        total,
+        count: hits.length,
+        offset: 0,
+        limit: hits.length,
+      };
+      if (status) status.textContent = "预览兜底（请重启后端以启用完整分页）";
+    }
+    // 合并为完整分页状态：保留 total，当前页 hits
+    // 为了统一 pager，browse 时 hits 只存当前页，用 total 算页数
+    dssResultState = {
+      mode: "browse",
+      hits: res.hits || [],
+      total: res.total || 0,
+      // 标记 browse 为服务端分页：hits 仅当前页
+      _serverPage: true,
+      _offset: offset,
+    };
+    // 渲染：browse 服务端分页时不再 slice
+    const head = document.getElementById("dss-result-head");
+    const body = document.getElementById("dss-result-body");
+    const countEl = document.getElementById("dss-result-count");
+    const titleEl = document.getElementById("dss-result-title");
+    const badgeEl = document.getElementById("dss-result-badge");
+    if (titleEl) titleEl.textContent = "数据集内容";
+    if (badgeEl) {
+      badgeEl.textContent = "默认（无规则）";
+      badgeEl.className = "dss-badge dss-badge-default";
+    }
+    const hits = res.hits || [];
+    const total = res.total || 0;
+    if (countEl) {
+      if (!total) countEl.textContent = "（0 条）";
+      else {
+        const from = total ? offset + 1 : 0;
+        const to = offset + hits.length;
+        countEl.textContent = `（${from}–${to} / 共 ${total} 条）`;
+      }
+    }
+    if (!head || !body) return;
+    if (!hits.length) {
+      head.innerHTML = "";
+      body.innerHTML = `<tr><td class="hint">数据集为空</td></tr>`;
+    } else {
+      head.innerHTML = `<tr><th>#</th><th>id</th><th>text</th></tr>`;
+      body.innerHTML = hits
+        .map((r) => {
+          const text = r.text == null ? "" : String(r.text);
+          return `<tr>
+            <td>${r.rank ?? r.seq ?? ""}</td>
+            <td>${escapeHtml(r.id == null ? "" : String(r.id))}</td>
+            <td title="${escapeHtml(text)}">${escapeHtml(
+              text.length > 200 ? text.slice(0, 200) + "…" : text
+            )}</td>
+          </tr>`;
+        })
+        .join("");
+    }
+    renderDssPager();
+    if (status) status.textContent = "默认（无规则）· 可继续检索";
+  } catch (e) {
+    if (status) status.textContent = "加载失败";
+    toast(e.message || "加载数据集内容失败", true);
+  }
+}
+
+function dssSelectedDataset() {
+  if (!dssCurrentId) return null;
+  return dssDatasetCache.find((x) => x.id === dssCurrentId) || null;
+}
+
+/** 主界面只显示已选数据集名称 */
+function updateDssSelectedLabel() {
+  const nameEl = document.getElementById("dss-ds-selected-name");
+  const meta = document.getElementById("dss-selected-meta");
+  const pickBtn = document.getElementById("btn-dss-pick-ds");
+  const d = dssSelectedDataset();
+  if (nameEl) {
+    if (d) {
+      nameEl.textContent = d.name || `数据集 #${d.id}`;
+      nameEl.classList.remove("is-empty");
+      nameEl.title = `#${d.id} · ${d.row_count || 0} 条`;
+    } else if (dssCurrentId) {
+      nameEl.textContent = `数据集 #${dssCurrentId}`;
+      nameEl.classList.remove("is-empty");
+      nameEl.title = "";
+    } else {
+      nameEl.textContent = "未选择数据集";
+      nameEl.classList.add("is-empty");
+      nameEl.title = "";
+    }
+  }
+  if (meta) {
+    meta.textContent = d
+      ? d.name || `数据集 #${d.id}`
+      : dssCurrentId
+        ? `数据集 #${dssCurrentId}`
+        : "请选择数据集";
+  }
+  if (pickBtn) {
+    pickBtn.textContent = dssCurrentId ? "更换" : "选择数据集";
+  }
+}
+
+function openDssDatasetModal() {
+  const modal = document.getElementById("dss-ds-modal");
+  if (!modal) return;
+  modal.hidden = false;
+  renderDssDatasetList();
+  const q = document.getElementById("dss-ds-q");
+  if (q) {
+    // 打开时保留上次筛选，并聚焦搜索框
+    setTimeout(() => q.focus(), 30);
+  }
+}
+
+function closeDssDatasetModal() {
+  const modal = document.getElementById("dss-ds-modal");
+  if (modal) modal.hidden = true;
+}
+
+function renderDssDatasetList() {
+  const listEl = document.getElementById("dss-ds-list");
+  if (!listEl) return;
+  const q = (dssDsQuery || "").trim().toLowerCase();
+  let items = dssDatasetCache || [];
+  if (q) {
+    items = items.filter((d) => {
+      const blob = `${d.id} ${d.name || ""} ${d.description || ""} ${
+        d.original_filename || ""
+      }`.toLowerCase();
+      return blob.includes(q);
+    });
+  }
+  if (!items.length) {
+    listEl.innerHTML = `<p class="hint" style="padding:12px">${
+      dssDatasetCache.length ? "无匹配数据集" : "暂无数据集，请先在数据集库创建"
+    }</p>`;
+    return;
+  }
+  listEl.innerHTML = items
+    .map((d) => {
+      const active = dssCurrentId === d.id ? " active" : "";
+      return `<div class="ds-item${active}" data-id="${d.id}" role="option" aria-selected="${
+        dssCurrentId === d.id ? "true" : "false"
+      }">
+        <div class="dsi-name">${escapeHtml(d.name || "未命名")}</div>
+        <div class="dsi-meta">#${d.id} · ${d.row_count || 0} 条 · ${escapeHtml(
+          d.status || "—"
+        )}${d.vector_ready ? " · 向量就绪" : ""}</div>
+      </div>`;
+    })
+    .join("");
+  listEl.querySelectorAll(".ds-item[data-id]").forEach((el) => {
+    el.addEventListener("click", () => {
+      selectDssDataset(+el.dataset.id)
+        .then(() => closeDssDatasetModal())
+        .catch((e) => toast(e.message, true));
+    });
+  });
+}
+
+async function selectDssDataset(id) {
+  const tid = +id;
+  if (!tid) return;
+  dssCurrentId = tid;
+  dssPage = 1;
+  dssResultState = { mode: "browse", hits: [], total: 0, _serverPage: true };
+  updateDssSelectedLabel();
+  renderDssDatasetList();
+  dssRefreshVectorMeta();
+  await loadDssBrowsePage();
+}
+
+async function initDatasetSearchPage() {
+  const formCard = document.querySelector("#view-dataset-search .dss-form-card");
+  if (!formCard) return;
+  try {
+    dssDatasetCache = (await api("/datasets")) || [];
+  } catch (e) {
+    dssDatasetCache = [];
+    toast(e.message || "加载数据集失败", true);
+  }
+  updateDssSelectedLabel();
+  dssUpdateModeUI();
+  const status = document.getElementById("dss-status");
+  if (status) {
+    status.textContent = dssDatasetCache.length
+      ? dssCurrentId
+        ? "就绪"
+        : "请选择数据集"
+      : "请先在数据集库中创建数据集";
+  }
+  // 若之前选中的仍在列表中，刷新内容；否则默认选中第一项
+  if (dssCurrentId && dssDatasetCache.some((d) => d.id === dssCurrentId)) {
+    await selectDssDataset(dssCurrentId);
+  } else if (dssDatasetCache.length) {
+    await selectDssDataset(dssDatasetCache[0].id);
+  } else {
+    dssCurrentId = null;
+    updateDssSelectedLabel();
+    renderDssResults({ mode: "browse", hits: [], count: 0, total: 0 });
+  }
+}
+
+document.getElementById("dss-mode")?.addEventListener("change", () => dssUpdateModeUI());
+
+document.getElementById("btn-dss-pick-ds")?.addEventListener("click", () => {
+  openDssDatasetModal();
+});
+document.getElementById("dss-ds-selected")?.addEventListener("click", () => {
+  openDssDatasetModal();
+});
+document.getElementById("dss-ds-modal-cancel")?.addEventListener("click", () => {
+  closeDssDatasetModal();
+});
+document.getElementById("dss-ds-modal")?.addEventListener("click", (e) => {
+  // 点击遮罩关闭
+  if (e.target === e.currentTarget) closeDssDatasetModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const modal = document.getElementById("dss-ds-modal");
+  if (modal && !modal.hidden) closeDssDatasetModal();
+});
+
+document.getElementById("dss-ds-q")?.addEventListener("input", (e) => {
+  dssDsQuery = e.target.value || "";
+  if (dssDsQueryTimer) clearTimeout(dssDsQueryTimer);
+  dssDsQueryTimer = setTimeout(() => renderDssDatasetList(), 150);
+});
+
+document.getElementById("btn-dss-run")?.addEventListener("click", async () => {
+  const dsId = dssCurrentId;
+  const mode = document.getElementById("dss-mode")?.value || "keywords";
+  const query = (document.getElementById("dss-query")?.value || "").trim();
+  const status = document.getElementById("dss-status");
+  if (!dsId) {
+    toast("请先选择数据集", true);
+    return;
+  }
+  // 条件为空：恢复默认（无规则）浏览
+  if (!query) {
+    dssPage = 1;
+    dssResultState = { mode: "browse", hits: [], total: 0, _serverPage: true };
+    await loadDssBrowsePage();
+    toast("已恢复默认浏览（无规则）");
+    return;
+  }
+  const match =
+    document.querySelector('input[name="dss-match"]:checked')?.value || "any";
+  const caseSensitive =
+    mode === "keywords" ? !!document.getElementById("dss-case")?.checked : false;
+  // 与后端校验对齐：top_k ≤ 200，limit ≤ 500
+  let topK = +(document.getElementById("dss-top-k")?.value || 20) || 20;
+  topK = Math.min(200, Math.max(1, topK));
+  // 向量模式可选阈值：score ≥ min_score，再取 Top-K；留空 = 不过滤
+  const minScoreRaw = (document.getElementById("dss-min-score")?.value || "").trim();
+  let minScore = null;
+  if (minScoreRaw !== "" && (mode === "vector" || mode === "vector_fast")) {
+    const parsed = Number(minScoreRaw);
+    if (!Number.isFinite(parsed)) {
+      toast("阈值必须是数字（可留空表示不限）", true);
+      return;
+    }
+    minScore = parsed;
+  }
+  // 关键词/正则：一次最多拉 500 条命中，再前端分页
+  const limit = 500;
+  if (status) status.textContent = "检索中…";
+  try {
+    const body = {
+      mode,
+      query,
+      match,
+      case_sensitive: caseSensitive,
+      top_k: topK,
+      limit,
+    };
+    if (minScore != null) body.min_score = minScore;
+    const res = await api(`/datasets/${dsId}/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    dssResultState = {
+      mode: res.mode || mode,
+      hits: res.hits || [],
+      total:
+        typeof res.total === "number"
+          ? res.total
+          : (res.hits || []).length,
+      query: res.query || query,
+      min_score: res.min_score ?? minScore,
+      _serverPage: false,
+    };
+    dssPage = 1;
+    renderDssResultsPage();
+    const thrHint =
+      res.min_score != null && res.min_score !== undefined
+        ? ` · 阈值≥${res.min_score}`
+        : minScore != null
+          ? ` · 阈值≥${minScore}`
+          : "";
+    if (status) status.textContent = `完成 · ${dssResultState.total || 0} 条${thrHint}`;
+    toast(`检索完成：${dssResultState.total || 0} 条${thrHint}`);
+  } catch (e) {
+    if (status) status.textContent = "失败";
+    toast(e.message || "检索失败", true);
+  }
+});
+
+document.getElementById("dss-page-prev")?.addEventListener("click", () => {
+  dssGoPage(dssPage - 1).catch((e) => toast(e.message, true));
+});
+document.getElementById("dss-page-next")?.addEventListener("click", () => {
+  dssGoPage(dssPage + 1).catch((e) => toast(e.message, true));
+});
+document.getElementById("dss-page-size")?.addEventListener("change", (e) => {
+  dssPageSize = +(e.target.value || 50) || 50;
+  dssPage = 1;
+  if (dssResultState.mode === "browse") {
+    loadDssBrowsePage().catch((err) => toast(err.message, true));
+  } else {
+    renderDssResultsPage();
+  }
+});
+
+document.getElementById("dss-query")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    document.getElementById("btn-dss-run")?.click();
+  }
+});
+
+document.getElementById("ds-q")?.addEventListener("input", (e) => {
+  dsQuery = e.target.value || "";
+  if (dsQueryTimer) clearTimeout(dsQueryTimer);
+  dsQueryTimer = setTimeout(() => {
+    loadManagedDatasets().catch((err) => toast(err.message, true));
+  }, 200);
+});
+
+document.getElementById("ds-modality-filter")?.addEventListener("click", (e) => {
+  const chip = e.target.closest(".ds-mod-chip");
+  if (!chip || chip.disabled) return;
+  dsModalityFilter = chip.dataset.mod || "";
+  document
+    .querySelectorAll("#ds-modality-filter .ds-mod-chip")
+    .forEach((c) => c.classList.toggle("active", c === chip));
+  loadManagedDatasets().catch((err) => toast(err.message, true));
+});
+
+document.getElementById("btn-ds-new")?.addEventListener("click", () => {
+  const modal = document.getElementById("ds-create-modal");
+  const form = document.getElementById("form-ds-create");
+  if (form) form.reset();
+  const mod = document.getElementById("ds-create-modality");
+  if (mod) mod.value = "text";
+  resetDsCreateColmap();
+  if (modal) modal.hidden = false;
+  setTimeout(() => document.getElementById("ds-create-name")?.focus(), 30);
+});
+
+document.getElementById("ds-create-cancel")?.addEventListener("click", () => {
+  const modal = document.getElementById("ds-create-modal");
+  if (modal) modal.hidden = true;
+  resetDsCreateColmap();
+});
+document.getElementById("ds-create-modal")?.addEventListener("click", (e) => {
+  if (e.target?.id === "ds-create-modal") {
+    e.target.hidden = true;
+    resetDsCreateColmap();
+  }
+});
+
+document.getElementById("ds-create-file")?.addEventListener("change", async (e) => {
+  const input = e.target;
+  const file = input?.files?.[0];
+  if (!file) {
+    resetDsCreateColmap();
+    return;
+  }
+  const meta = document.getElementById("ds-create-inspect-meta");
+  if (meta) meta.textContent = "解析文件中…";
+  const colmap = document.getElementById("ds-create-colmap");
+  if (colmap) colmap.hidden = false;
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const headers = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(API + "/datasets/inspect-upload", {
+      method: "POST",
+      body: fd,
+      headers,
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.detail || res.statusText);
+    }
+    const info = await res.json();
+    fillDsCreateColmap(info);
+  } catch (err) {
+    resetDsCreateColmap();
+    if (input) input.value = "";
+    toast(err.message || "解析文件失败", true);
+  }
+});
+
+document.getElementById("form-ds-create")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = (document.getElementById("ds-create-name")?.value || "").trim();
+  const modality = document.getElementById("ds-create-modality")?.value || "text";
+  const description = (document.getElementById("ds-create-desc")?.value || "").trim();
+  const fileInput = document.getElementById("ds-create-file");
+  const hasFile = !!(fileInput?.files?.length);
+  const idCol = (document.getElementById("ds-create-id-column")?.value || "").trim();
+  const textCol = (document.getElementById("ds-create-text-column")?.value || "").trim();
+  if (!name) {
+    toast("名称不能为空", true);
+    return;
+  }
+  if (modality !== "text") {
+    toast("当前仅支持文本模态", true);
+    return;
+  }
+  if (!hasFile) {
+    toast("请上传数据文件", true);
+    return;
+  }
+  if (!textCol) {
+    toast("请先选择文件并勾选 Text 列", true);
+    return;
+  }
+  if (idCol && idCol === textCol) {
+    toast("ID 列与 Text 列不能相同", true);
+    return;
+  }
+  try {
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("modality", modality);
+    fd.append("description", description);
+    fd.append("file", fileInput.files[0]);
+    fd.append("id_column", idCol);
+    fd.append("text_column", textCol);
+    const headers = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(API + "/datasets", {
+      method: "POST",
+      body: fd,
+      headers,
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.detail || res.statusText);
+    }
+    const d = await res.json();
+    const modal = document.getElementById("ds-create-modal");
+    if (modal) modal.hidden = true;
+    resetDsCreateColmap();
+    toast(`已创建数据集 #${d.id}（${d.row_count || 0} 行，id/text 已按所选列生成）`);
+    dsCurrentId = d.id;
+    await loadManagedDatasets(d.id);
+  } catch (err) {
+    toast(err.message || "创建失败", true);
+  }
+});
+
+document.getElementById("btn-ds-save")?.addEventListener("click", async () => {
+  if (!dsCurrentId) {
+    toast("请先选择数据集", true);
+    return;
+  }
+  const name = (document.getElementById("ds-name")?.value || "").trim();
+  if (!name) {
+    toast("名称不能为空", true);
+    return;
+  }
+  try {
+    await api(`/datasets/${dsCurrentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        description: (document.getElementById("ds-description")?.value || "").trim() || null,
+      }),
+    });
+    toast("已保存");
+    await loadManagedDatasets(dsCurrentId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+document.getElementById("btn-ds-delete")?.addEventListener("click", async () => {
+  if (!dsCurrentId) return;
+  if (!window.confirm(`确定删除数据集 #${dsCurrentId}？此操作不可恢复。`)) return;
+  try {
+    await api(`/datasets/${dsCurrentId}`, { method: "DELETE" });
+    toast("已删除");
+    dsCurrentId = null;
+    await loadManagedDatasets();
+    showDsDetailEmpty();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+document.getElementById("btn-ds-download")?.addEventListener("click", async () => {
+  if (!dsCurrentId) return;
+  try {
+    const headers = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(API + `/datasets/${dsCurrentId}/download`, { headers });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.detail || res.statusText);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("content-disposition") || "";
+    let filename = `dataset_${dsCurrentId}`;
+    const m = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+    if (m) filename = decodeURIComponent(m[1].replace(/"/g, ""));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+/** ---------- 数据清洗（数据管理 · 二级） ---------- */
+/** 删除只记 id，原始 data.jsonl 不改写；支持按批次恢复 */
+let dcDatasetCache = [];
+let dcCurrentId = null;
+let dcDsQuery = "";
+let dcDsQueryTimer = null;
+/** @type {any|null} */
+let dcLastPreview = null;
+/** @type {any|null} */
+let dcOverview = null;
+/** @type {{ mode: string, hits: any[], total: number, selectedMark?: boolean, selectable?: boolean, _serverPage?: boolean }} */
+let dcResultState = {
+  mode: "browse",
+  hits: [],
+  total: 0,
+  selectedMark: false,
+  selectable: false,
+  _serverPage: true,
+};
+let dcPage = 1;
+let dcPageSize = 50;
+/** 匹配预览下的勾选 id 集合（默认不勾选；应用阈值/反选/点行可改） */
+let dcMatchSelectedIds = new Set();
+/** 当前选中是否处于「反选」态（仅 UI 标记；反选=对当前结果勾选取反，不重跑匹配） */
+let dcInvertApplied = false;
+/** 已生效的结果阈值（仅点「应用阈值」后写入；输入框草稿不直接生效） */
+let dcAppliedScoreThreshold = null;
+
+function dcSetHidden(el, hide) {
+  if (!el) return;
+  if (hide) {
+    el.hidden = true;
+    el.setAttribute("hidden", "");
+    el.style.display = "none";
+  } else {
+    el.hidden = false;
+    el.removeAttribute("hidden");
+    el.style.display = "";
+  }
+}
+
+function dcMethodNeedsScoreFilter() {
+  const method = document.getElementById("dc-method")?.value || "keywords";
+  return method === "vector" || method === "vector_fast" || method === "llm";
+}
+
+/** 已生效的结果阈值（点「应用阈值」后才有；用于角标/反选提示） */
+function getDcScoreThreshold() {
+  if (!dcMethodNeedsScoreFilter()) return null;
+  return dcAppliedScoreThreshold;
+}
+
+/** 读取输入框中的阈值草稿（未点应用前不生效） */
+function parseDcScoreThresholdInput() {
+  const raw = (document.getElementById("dc-min-score")?.value || "").trim();
+  if (raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function syncDcApplyScoreButton() {
+  const btn = document.getElementById("btn-dc-apply-score");
+  if (!btn) return;
+  const can =
+    dcMethodNeedsScoreFilter() &&
+    !!dcLastPreview &&
+    dcResultState.mode === "match" &&
+    !!dcResultState.selectable &&
+    (dcResultState.hits || []).length > 0;
+  btn.disabled = !can;
+}
+
+/**
+ * 点击「应用阈值」：把输入框数值固化为生效阈值，并本地筛选「选中」。
+ * - 必须输入有效数字；空输入不会生效（提示先填阈值）
+ * - 有数值：在仍展示全部结果的前提下，选中 score ≥ 阈值
+ * - 不重跑匹配；不隐藏低分样本
+ */
+function applyDcScoreThreshold(opts = {}) {
+  const silent = !!opts.silent;
+  if (dcResultState.mode !== "match" || !dcResultState.selectable) {
+    if (!silent) toast("请先预览匹配，再应用阈值", true);
+    return;
+  }
+  if (!dcMethodNeedsScoreFilter()) {
+    renderDcTablePage();
+    return;
+  }
+  const hits = dcResultState.hits || [];
+  if (!hits.length) {
+    if (!silent) toast("当前没有可筛选的结果", true);
+    return;
+  }
+  const raw = (document.getElementById("dc-min-score")?.value || "").trim();
+  if (raw === "") {
+    if (!silent) toast("请先在「结果阈值」输入数字，再点应用阈值", true);
+    const el = document.getElementById("dc-min-score");
+    if (el) el.focus();
+    return;
+  }
+  const thr = Number(raw);
+  if (!Number.isFinite(thr)) {
+    if (!silent) toast("阈值必须是有效数字，例如 0.6", true);
+    return;
+  }
+  dcAppliedScoreThreshold = thr;
+  dcInvertApplied = false;
+  // 只改勾选，不删行：全部 hits 仍展示
+  dcMatchSelectedIds = new Set(
+    hits
+      .filter((r) => {
+        if (r.score == null || r.score === "") return false;
+        const sc = Number(r.score);
+        return Number.isFinite(sc) && sc >= thr;
+      })
+      .map((r) => (r.id != null ? String(r.id) : ""))
+      .filter(Boolean)
+  );
+  renderDcTablePage();
+  syncDcInvertButton();
+  syncDcApplyScoreButton();
+  if (!silent) {
+    const total = hits.length;
+    toast(`已应用阈值 ≥ ${thr}：选中 ${dcMatchSelectedIds.size} / 共 ${total} 条（列表仍显示全部）`);
+    flashButton(document.getElementById("btn-dc-apply-score"), "ok", 500);
+  }
+}
+
+function dcUpdateMethodUI() {
+  const method = document.getElementById("dc-method")?.value || "keywords";
+  const matchOpt = document.getElementById("dc-options-match");
+  const scoreOpt = document.getElementById("dc-options-score");
+  const minScoreEl = document.getElementById("dc-min-score");
+  const minScoreField = document.getElementById("dc-min-score-field");
+  const scoreHint = document.getElementById("dc-score-hint");
+  const ta = document.getElementById("dc-query");
+  const isVec = method === "vector" || method === "vector_fast";
+  const isLlm = method === "llm";
+  dcSetHidden(matchOpt, method !== "keywords");
+  // 结果阈值：向量(TF-IDF/BGE) + 大模型（匹配后本地筛选选中）
+  const showScore = isVec || isLlm;
+  if (scoreOpt) {
+    if (showScore) {
+      scoreOpt.hidden = false;
+      scoreOpt.removeAttribute("hidden");
+      scoreOpt.style.display = "flex";
+    } else {
+      scoreOpt.hidden = true;
+      scoreOpt.setAttribute("hidden", "");
+      scoreOpt.style.display = "none";
+    }
+  }
+  if (minScoreEl) {
+    if (isLlm) {
+      minScoreEl.min = "0";
+      minScoreEl.max = "1";
+      minScoreEl.step = "0.05";
+      minScoreEl.placeholder = "例如 0.6";
+      if (minScoreField) {
+        minScoreField.title =
+          "预览后默认全不选；输入后点「应用阈值」选中 score≥；反选在右侧";
+      }
+    } else if (isVec) {
+      minScoreEl.min = "-1";
+      minScoreEl.max = "5";
+      minScoreEl.step = "0.05";
+      minScoreEl.placeholder = "例如 0.2";
+      if (minScoreField) {
+        minScoreField.title =
+          "预览后默认全不选；输入后点「应用阈值」选中 score≥；反选在右侧";
+      }
+    }
+  }
+  if (scoreHint) {
+    scoreHint.textContent = showScore
+      ? "带分结果：应用阈值筛选 · 反选对勾选取反"
+      : "预览后可反选当前勾选（本地，不重跑匹配）";
+  }
+  syncDcApplyScoreButton();
+  if (!ta) {
+    syncDcInvertButton();
+    return;
+  }
+  if (method === "keywords") {
+    ta.placeholder = "关键词，空格/逗号分隔，例如：广告 推广";
+  } else if (method === "regex") {
+    ta.placeholder = "正则，例如：加微|VX\\s*\\d{5,}";
+  } else if (method === "vector_fast") {
+    ta.placeholder = "快速向量匹配的查询文本…";
+  } else if (isLlm) {
+    ta.placeholder =
+      "支持自然语言。例：广告引流 / 删除含微信号或手机号的样本 / 去掉灌水乱码";
+  } else {
+    ta.placeholder = "语义相近的查询文本…";
+  }
+  syncDcInvertButton();
+  syncDcApplyScoreButton();
+}
+
+function syncDcInvertButton() {
+  const btn = document.getElementById("btn-dc-invert");
+  if (!btn) return;
+  // 有可勾选结果即可反选：匹配预览 或 无条件浏览
+  const can =
+    !!dcCurrentId &&
+    !!dcResultState.selectable &&
+    (dcResultState.mode === "match" || dcResultState.mode === "browse") &&
+    (dcResultState.hits || []).length > 0;
+  btn.disabled = !can;
+  btn.classList.toggle("is-active", !!dcInvertApplied);
+  btn.title = !can
+    ? "右侧列表可点击勾选；有数据后可对当前页勾选取反"
+    : dcInvertApplied
+      ? "当前已反选；再点一次再取反（恢复上次勾选集合）"
+      : "对当前页结果勾选取反：已选→不选，未选→选中（本地瞬间完成）";
+  btn.textContent = dcInvertApplied ? "反选（已开）" : "反选";
+}
+
+function dcTotalPages() {
+  const total = dcResultState.total || 0;
+  const size = dcPageSize || 50;
+  if (total <= 0) return 1;
+  return Math.max(1, Math.ceil(total / size));
+}
+
+function renderDcPager() {
+  const pager = document.getElementById("dc-pager");
+  const info = document.getElementById("dc-page-info");
+  const prev = document.getElementById("dc-page-prev");
+  const next = document.getElementById("dc-page-next");
+  const sizeSel = document.getElementById("dc-page-size");
+  if (!pager) return;
+  const total = dcResultState.total || 0;
+  const pages = dcTotalPages();
+  if (total <= 0) {
+    pager.hidden = true;
+    return;
+  }
+  pager.hidden = false;
+  if (dcPage > pages) dcPage = pages;
+  if (dcPage < 1) dcPage = 1;
+  if (info) info.textContent = `第 ${dcPage} / ${pages} 页 · 共 ${total} 条`;
+  if (prev) prev.disabled = dcPage <= 1;
+  if (next) next.disabled = dcPage >= pages;
+  if (sizeSel && String(sizeSel.value) !== String(dcPageSize)) {
+    sizeSel.value = String(dcPageSize);
+  }
+}
+
+function dcMatchSelectedCount() {
+  return dcMatchSelectedIds ? dcMatchSelectedIds.size : 0;
+}
+
+function updateDcMatchHeaderCount() {
+  const selectable =
+    !!dcResultState.selectable &&
+    (dcResultState.mode === "match" || dcResultState.mode === "browse");
+  if (!selectable) {
+    updateDcHeaderCount();
+    return;
+  }
+  const total = dcResultState.total || (dcResultState.hits || []).length;
+  const selected = dcMatchSelectedCount();
+  const thr = getDcScoreThreshold();
+  let extra = `选中 ${selected} / ${
+    dcResultState.mode === "browse" ? "生效" : "结果"
+  } ${total}`;
+  if (
+    thr != null &&
+    dcMethodNeedsScoreFilter() &&
+    !dcInvertApplied &&
+    dcResultState.mode === "match"
+  ) {
+    extra += ` · 阈值≥${thr}`;
+  }
+  updateDcHeaderCount(extra);
+}
+
+function renderDcTablePage() {
+  const head = document.getElementById("dc-preview-head");
+  const body = document.getElementById("dc-preview-body");
+  if (!head || !body) return;
+  const all = dcResultState.hits || [];
+  const server = !!dcResultState._serverPage;
+  let pageRows = all;
+  if (!server) {
+    const start = (dcPage - 1) * dcPageSize;
+    pageRows = all.slice(start, start + dcPageSize);
+  }
+  // 可勾选时显示选中数（浏览/匹配）；否则显示生效/原始
+  if (
+    dcResultState.selectable &&
+    (dcResultState.mode === "match" || dcResultState.mode === "browse")
+  ) {
+    updateDcMatchHeaderCount();
+  } else {
+    updateDcHeaderCount();
+  }
+  if (!pageRows.length) {
+    head.innerHTML = "";
+    body.innerHTML = `<tr><td class="hint">暂无数据</td></tr>`;
+    renderDcPager();
+    return;
+  }
+  const cols = ["id", "text"];
+  if (pageRows.some((r) => r.score != null)) cols.splice(1, 0, "score");
+  if (pageRows.some((r) => r.matched)) cols.push("matched");
+  if (pageRows.some((r) => r.vs_current != null || r.status != null)) {
+    cols.push("vs_current");
+  }
+  if (
+    pageRows.some((r) => r.status != null) &&
+    !cols.includes("status") &&
+    !pageRows.some((r) => r.vs_current != null)
+  ) {
+    cols.push("status");
+  }
+  const selectable = !!dcResultState.selectable;
+  const colLabels = {
+    id: "id",
+    text: "text",
+    score: "score",
+    matched: "matched",
+    vs_current: "相对当前",
+    status: "状态",
+  };
+  head.innerHTML = `<tr>${cols
+    .map((c) => `<th>${escapeHtml(colLabels[c] || c)}</th>`)
+    .join("")}</tr>`;
+  body.innerHTML = pageRows
+    .map((r) => {
+      const rid = r.id != null ? String(r.id) : "";
+      let rowClass = "";
+      if (selectable && rid) {
+        const on = dcMatchSelectedIds.has(rid);
+        rowClass = on ? "dc-row-pickable dc-row-on" : "dc-row-pickable dc-row-off";
+      } else if (dcResultState.selectedMark) {
+        rowClass = "dc-row-selected";
+      }
+      return `<tr class="${rowClass}" data-id="${escapeHtml(rid)}" title="${
+        selectable ? "点击切换勾选（深色=删除，浅色=保留）" : ""
+      }">${cols
+        .map((c) => {
+          let v = r[c];
+          if (c === "matched" && Array.isArray(v)) v = v.join(", ");
+          if (c === "score" && typeof v === "number") v = v.toFixed(4);
+          const s = v == null ? "" : String(v);
+          return `<td title="${escapeHtml(s)}">${escapeHtml(
+            s.length > 120 ? s.slice(0, 120) + "…" : s
+          )}</td>`;
+        })
+        .join("")}</tr>`;
+    })
+    .join("");
+  if (selectable) {
+    body.querySelectorAll("tr.dc-row-pickable[data-id]").forEach((tr) => {
+      tr.addEventListener("click", () => {
+        const id = tr.getAttribute("data-id") || "";
+        if (!id) return;
+        if (dcMatchSelectedIds.has(id)) dcMatchSelectedIds.delete(id);
+        else dcMatchSelectedIds.add(id);
+        // 只更新当前行样式与计数，避免整表闪烁
+        const on = dcMatchSelectedIds.has(id);
+        tr.classList.toggle("dc-row-on", on);
+        tr.classList.toggle("dc-row-off", !on);
+        updateDcMatchHeaderCount();
+      });
+    });
+  }
+  renderDcPager();
+}
+
+async function loadDcBrowsePage(opts = {}) {
+  if (!dcCurrentId) return;
+  const resetSelection = !!opts.resetSelection;
+  const offset = (dcPage - 1) * dcPageSize;
+  const res = await api(
+    `/datasets/${dcCurrentId}/clean/records?limit=${dcPageSize}&offset=${offset}`
+  );
+  dcResultState = {
+    mode: "browse",
+    hits: res.items || [],
+    total: typeof res.total === "number" ? res.total : (res.items || []).length,
+    selectedMark: false,
+    // 无条件也可点击勾选删除
+    selectable: true,
+    _serverPage: true,
+  };
+  if (resetSelection) {
+    dcMatchSelectedIds = new Set();
+    dcInvertApplied = false;
+  }
+  renderDcTablePage();
+  syncDcInvertButton();
+}
+
+async function dcGoPage(page) {
+  const pages = dcTotalPages();
+  dcPage = Math.min(Math.max(1, page), pages);
+  if (dcResultState.mode === "browse" && dcResultState._serverPage) {
+    await loadDcBrowsePage();
+  } else {
+    renderDcTablePage();
+  }
+}
+
+function updateDcSelectedLabel() {
+  const nameEl = document.getElementById("dc-ds-selected-name");
+  const meta = document.getElementById("dc-selected-meta");
+  const pickBtn = document.getElementById("btn-dc-pick-ds");
+  const d = dcDatasetCache.find((x) => x.id === dcCurrentId);
+  if (nameEl) {
+    if (d) {
+      nameEl.textContent = d.name || `数据集 #${d.id}`;
+      nameEl.classList.remove("is-empty");
+      nameEl.title = `#${d.id} · ${d.row_count || 0} 条`;
+    } else if (dcCurrentId) {
+      nameEl.textContent = `数据集 #${dcCurrentId}`;
+      nameEl.classList.remove("is-empty");
+    } else {
+      nameEl.textContent = "未选择数据集";
+      nameEl.classList.add("is-empty");
+    }
+  }
+  if (meta) {
+    meta.textContent = d
+      ? d.name || `数据集 #${d.id}`
+      : dcCurrentId
+        ? `数据集 #${dcCurrentId}`
+        : "请选择数据集";
+  }
+  if (pickBtn) pickBtn.textContent = dcCurrentId ? "更换" : "选择数据集";
+}
+
+function openDcDatasetModal() {
+  const modal = document.getElementById("dc-ds-modal");
+  if (!modal) return;
+  modal.hidden = false;
+  renderDcDatasetList();
+  setTimeout(() => document.getElementById("dc-ds-q")?.focus(), 30);
+}
+
+function closeDcDatasetModal() {
+  const modal = document.getElementById("dc-ds-modal");
+  if (modal) modal.hidden = true;
+}
+
+function renderDcDatasetList() {
+  const listEl = document.getElementById("dc-ds-list");
+  if (!listEl) return;
+  const q = (dcDsQuery || "").trim().toLowerCase();
+  let items = dcDatasetCache || [];
+  if (q) {
+    items = items.filter((d) => {
+      const blob = `${d.id} ${d.name || ""} ${d.description || ""} ${
+        d.original_filename || ""
+      }`.toLowerCase();
+      return blob.includes(q);
+    });
+  }
+  if (!items.length) {
+    listEl.innerHTML = `<p class="hint" style="padding:12px">${
+      dcDatasetCache.length ? "无匹配数据集" : "暂无数据集，请先在数据集库创建"
+    }</p>`;
+    return;
+  }
+  listEl.innerHTML = items
+    .map((d) => {
+      const active = dcCurrentId === d.id ? " active" : "";
+      return `<div class="ds-item${active}" data-id="${d.id}">
+        <div class="dsi-name">${escapeHtml(d.name || "未命名")}</div>
+        <div class="dsi-meta">#${d.id} · ${d.row_count || 0} 条 · ${escapeHtml(
+          d.status || "—"
+        )}</div>
+      </div>`;
+    })
+    .join("");
+  listEl.querySelectorAll(".ds-item[data-id]").forEach((el) => {
+    el.addEventListener("click", () => {
+      selectDcDataset(+el.dataset.id)
+        .then(() => closeDcDatasetModal())
+        .catch((e) => toast(e.message, true));
+    });
+  });
+}
+
+function setDcResultBadge(kind, text) {
+  const badge = document.getElementById("dc-result-badge");
+  if (!badge) return;
+  badge.textContent = text || "—";
+  badge.className =
+    kind === "default" ? "dss-badge dss-badge-default" : "dss-badge";
+}
+
+function setDcClientRows(rows, opts = {}) {
+  const list = rows || [];
+  const selectable = !!opts.selectable;
+  dcResultState = {
+    mode: opts.mode || "match",
+    hits: list,
+    total: typeof opts.total === "number" ? opts.total : list.length,
+    selectedMark: !!opts.selectedMark,
+    selectable,
+    _serverPage: false,
+  };
+  if (selectable) {
+    if (opts.selectAll) {
+      // 关键词/正则等：可默认全选匹配结果
+      dcMatchSelectedIds = new Set(
+        list.map((r) => (r.id != null ? String(r.id) : "")).filter(Boolean)
+      );
+    } else {
+      // 向量/大模型/带分：默认全不选，等点「应用阈值」或手动点行
+      dcMatchSelectedIds = new Set();
+    }
+  } else {
+    dcMatchSelectedIds = new Set();
+  }
+  dcPage = 1;
+  renderDcTablePage();
+  syncDcApplyScoreButton();
+}
+
+/** 统计条已移除，保留空函数避免旧调用报错 */
+function renderDcStatsFromOverview(_ov, _extra) {
+  /* no-op：展示区与数据检索一致，底部仅分页 */
+}
+
+/** 「数据集内容」右侧：生效 x / 原始 y（原「共 n 条」位置） */
+function updateDcHeaderCount(extra) {
+  const countEl = document.getElementById("dc-result-count");
+  if (!countEl) return;
+  if (dcOverview) {
+    let t = `生效 ${dcOverview.active_count ?? "—"} / 原始 ${
+      dcOverview.original_count ?? "—"
+    }`;
+    if (extra) t += ` · ${extra}`;
+    countEl.textContent = t;
+  } else if (extra) {
+    countEl.textContent = extra;
+  } else {
+    countEl.textContent = "";
+  }
+}
+
+function methodLabel(m) {
+  const map = {
+    keywords: "关键词",
+    regex: "正则",
+    vector_fast: "快速向量",
+    vector: "语义向量",
+    llm: "大模型",
+    manual: "手动勾选",
+    rollback: "回退",
+    restore: "回退",
+    checkpoint: "进度",
+    save: "进度",
+    progress: "进度",
+  };
+  return map[m] || m || "—";
+}
+
+/** 当前右侧正在查看的 diff 批次 id */
+let dcViewingOpId = null;
+
+function setDcDiffRestoreButton(opId, canRollback) {
+  const btn = document.getElementById("btn-dc-diff-restore");
+  if (!btn) return;
+  if (!opId || !canRollback) {
+    btn.hidden = true;
+    btn.dataset.opId = "";
+    btn.disabled = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.dataset.opId = opId;
+  btn.textContent = "回退本批";
+  btn.disabled = false;
+  btn.title = "回退该删除批次：恢复本批删除的样本到生效集（写入回退 diff）";
+}
+
+function renderDcOpsList(ops) {
+  const list = document.getElementById("dc-ops-list");
+  if (!list) return;
+  const items = ops || [];
+  if (!items.length) {
+    list.innerHTML = `<p class="hint" style="padding:10px">暂无清洗记录</p>`;
+    return;
+  }
+  list.innerHTML = items
+    .map((op, idx) => {
+      const kind = String(op.kind || "delete").toLowerCase();
+      const isRollback = kind === "rollback" || kind === "restore";
+      const isCheckpoint =
+        kind === "checkpoint" || kind === "save" || kind === "progress";
+      // 回退 / 进度快照 无回退按钮
+      const canRollback =
+        op.can_rollback !== false &&
+        !isRollback &&
+        !isCheckpoint &&
+        !(idx === 0 && isRollback);
+      const inv = isRollback
+        ? "回退"
+        : isCheckpoint
+          ? "快照"
+          : op.invert
+            ? "反选"
+            : "正选";
+      const q = (op.query || "").slice(0, 40);
+      const dsum = (op.diff_summary || "").slice(0, 60);
+      const active =
+        dcViewingOpId && String(dcViewingOpId) === String(op.id)
+          ? " is-active-diff"
+          : "";
+      const countLabel = isRollback
+        ? `恢复 ${op.count ?? 0} 条`
+        : isCheckpoint
+          ? `累计已删 ${op.count ?? 0}`
+          : `删 ${op.count ?? 0} 条`;
+      const restoreBtn = canRollback
+        ? `<button type="button" class="secondary dc-op-restore" data-op-id="${escapeHtml(
+            op.id || ""
+          )}">回退</button>`
+        : "";
+      return `<div class="dc-op-item${active}" data-op-id="${escapeHtml(op.id || "")}">
+        <div class="dc-op-main" data-op-id="${escapeHtml(op.id || "")}" title="点击查看 diff">
+          <div class="dc-op-title">${escapeHtml(methodLabel(op.method))} · ${inv} · ${countLabel}</div>
+          <div class="dc-op-meta">${escapeHtml(dsum || q || "—")}${
+            op.label ? " · " + escapeHtml(op.label) : ""
+          } · ${escapeHtml((op.created_at || "").replace("T", " ").slice(0, 19))}</div>
+        </div>
+        <div class="dc-op-actions">
+          <button type="button" class="secondary dc-op-diff" data-op-id="${escapeHtml(
+            op.id || ""
+          )}">diff</button>
+          ${restoreBtn}
+        </div>
+      </div>`;
+    })
+    .join("");
+  list.querySelectorAll(".dc-op-diff, .dc-op-main").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = el.dataset.opId;
+      if (id) viewDcDiff(id).catch((err) => toast(err.message, true));
+    });
+  });
+  list.querySelectorAll(".dc-op-restore").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      restoreDcOp(btn.dataset.opId).catch((err) => toast(err.message, true));
+    });
+  });
+}
+
+function clearDcFormForNextRound() {
+  const q = document.getElementById("dc-query");
+  if (q) q.value = "";
+  const label = document.getElementById("dc-label");
+  if (label) label.value = "";
+  const any = document.querySelector('input[name="dc-match"][value="any"]');
+  if (any) any.checked = true;
+  const cs = document.getElementById("dc-case");
+  if (cs) cs.checked = false;
+  const minScore = document.getElementById("dc-min-score");
+  if (minScore) minScore.value = "";
+  dcLastPreview = null;
+  dcInvertApplied = false;
+  dcAppliedScoreThreshold = null;
+  dcUpdateMethodUI();
+  syncDcInvertButton();
+  syncDcApplyScoreButton();
+}
+
+async function viewDcDiff(opId) {
+  if (!dcCurrentId || !opId) return;
+  const status = document.getElementById("dc-status");
+  if (status) status.textContent = "加载 diff…";
+  try {
+    const res = await api(
+      `/datasets/${dcCurrentId}/clean/ops/${encodeURIComponent(opId)}`
+    );
+    const op = res.op || {};
+    const diff = res.diff || {};
+    const vs = res.vs_current || {};
+    const batchRows = diff.deleted_records || [];
+    // 优先展示「相对当前版本」有差异的样本；若无集合差，展示本批涉及样本及相对当前状态
+    const vsRows = vs.rows || [];
+    const rows = vsRows.length
+      ? vsRows
+      : batchRows.map((r) => ({
+          ...r,
+          status: r.vs_current || (r.still_deleted ? "仍已删除" : "当前已生效"),
+        }));
+    dcViewingOpId = op.id || opId;
+    const titleEl = document.getElementById("dc-result-title");
+    const action = String(diff.action || op.method || op.kind || "").toLowerCase();
+    const isRollback = action === "rollback" || action === "restore";
+    const isCheckpoint =
+      action === "checkpoint" ||
+      action === "save" ||
+      action === "progress" ||
+      String(op.method || "").toLowerCase() === "checkpoint";
+    const canRollback = !!(
+      res.can_rollback ??
+      op.can_rollback ??
+      (!isRollback && !isCheckpoint)
+    );
+    if (titleEl) {
+      titleEl.textContent = vsRows.length
+        ? `Diff #${op.id || opId} · 相对当前`
+        : `Diff #${op.id || opId} · 本批`;
+    }
+    setDcResultBadge(
+      "",
+      isRollback ? "回退 diff" : isCheckpoint ? "进度快照" : "删除 diff"
+    );
+    setDcDiffRestoreButton(dcViewingOpId, canRollback);
+    setDcClientRows(rows, {
+      mode: "diff",
+      selectedMark: true,
+      total: rows.length,
+    });
+    // 高亮当前历史项
+    document.querySelectorAll(".dc-op-item").forEach((el) => {
+      el.classList.toggle("is-active-diff", el.dataset.opId === String(opId));
+    });
+    const vsSum =
+      vs.summary ||
+      diff.summary ||
+      (isRollback
+        ? `回退 ${op.count ?? rows.length} 条`
+        : `本批 ${batchRows.length} 条`);
+    updateDcHeaderCount(
+      `${vsSum}${canRollback ? " · 可回退" : ""}`
+    );
+    // diff 视图不可反选 / 应用阈值
+    dcLastPreview = null;
+    dcInvertApplied = false;
+    dcAppliedScoreThreshold = null;
+    syncDcInvertButton();
+    syncDcApplyScoreButton();
+    if (status) {
+      status.hidden = true;
+      status.textContent = "";
+    }
+  } catch (e) {
+    if (status) {
+      status.hidden = false;
+      status.textContent = "失败";
+    }
+    throw e;
+  }
+}
+
+function collectDcMatchBody(opts = {}) {
+  const method = document.getElementById("dc-method")?.value || "keywords";
+  const query = (document.getElementById("dc-query")?.value || "").trim();
+  // 结果阈值仅前端筛选，不发给后端（后端返回全部带分结果）
+  // invert 不是清洗条件：预览始终正选；反选按钮/删除时再带上当前反选状态
+  const invert =
+    opts.invert != null ? !!opts.invert : !!dcInvertApplied;
+  return {
+    method,
+    query,
+    match:
+      document.querySelector('input[name="dc-match"]:checked')?.value || "any",
+    case_sensitive:
+      method === "keywords"
+        ? !!document.getElementById("dc-case")?.checked
+        : false,
+    invert,
+    label: (document.getElementById("dc-label")?.value || "").trim(),
+  };
+}
+
+function buildDcSuggestedSaveName(ov) {
+  if (ov && ov.suggested_save_name) return ov.suggested_save_name;
+  const base = (ov && ov.name) || "数据集";
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(
+    d.getHours()
+  )}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${base}_清洗_${stamp}`;
+}
+
+function refreshDcSaveNameDefault(ov) {
+  const expBtn = document.getElementById("btn-dc-export");
+  // 导出到库：需要仍有生效样本
+  if (expBtn) expBtn.disabled = !dcCurrentId || !(ov?.active_count > 0);
+}
+
+/** 导出到数据集库弹层 */
+function openDcExportDatasetModal() {
+  if (!dcCurrentId) {
+    toast("请先选择数据集", true);
+    return;
+  }
+  if (!(dcOverview?.active_count > 0)) {
+    toast("当前生效样本为空，无法导出到数据集库", true);
+    return;
+  }
+  const modal = document.getElementById("dc-save-modal");
+  const input = document.getElementById("dc-save-name");
+  const hint = document.getElementById("dc-save-name-hint");
+  const modalHint = document.getElementById("dc-save-modal-hint");
+  const err = document.getElementById("dc-save-error");
+  const suggested = buildDcSuggestedSaveName(dcOverview);
+  if (input) {
+    input.value = suggested;
+    input.dataset.defaultName = suggested;
+  }
+  if (hint) {
+    hint.textContent = `默认：${suggested}（可改）`;
+  }
+  if (modalHint) {
+    modalHint.textContent = `将当前生效 ${
+      dcOverview?.active_count ?? "—"
+    } 条导出为新数据集（仅存 id 引用，不复制原始全文）；之后可在数据集库下载。不修改本数据集清洗进度。`;
+  }
+  if (err) {
+    err.hidden = true;
+    err.textContent = "";
+  }
+  if (modal) modal.hidden = false;
+  setTimeout(() => {
+    input?.focus();
+    input?.select();
+  }, 30);
+}
+
+function closeDcSaveModal() {
+  const modal = document.getElementById("dc-save-modal");
+  if (modal) modal.hidden = true;
+}
+
+async function loadDcOverview() {
+  if (!dcCurrentId) return null;
+  const ov = await api(`/datasets/${dcCurrentId}/clean`);
+  dcOverview = ov;
+  dcViewingOpId = null;
+  dcLastPreview = null;
+  dcInvertApplied = false;
+  dcAppliedScoreThreshold = null;
+  const titleEl = document.getElementById("dc-result-title");
+  if (titleEl) titleEl.textContent = "数据集内容";
+  setDcResultBadge(
+    "default",
+    ov.deleted_count > 0 ? "已清洗" : "默认（无规则）"
+  );
+  setDcDiffRestoreButton(null, false);
+  renderDcStatsFromOverview(ov);
+  renderDcOpsList(ov.ops || []);
+  refreshDcSaveNameDefault(ov);
+  // 无条件浏览：服务端分页加载生效样本（可点击勾选）
+  dcPage = 1;
+  dcMatchSelectedIds = new Set();
+  dcInvertApplied = false;
+  await loadDcBrowsePage({ resetSelection: true });
+  refreshDcSaveNameDefault(ov);
+  updateDcHeaderCount();
+  syncDcInvertButton();
+  syncDcApplyScoreButton();
+  const status = document.getElementById("dc-status");
+  if (status) {
+    status.textContent = "";
+    status.hidden = true;
+  }
+  return ov;
+}
+
+/** 确认导出：当前生效样本 → 数据集库新数据集 */
+async function exportDcToLibraryFromModal() {
+  if (!dcCurrentId) {
+    toast("请先选择数据集", true);
+    return;
+  }
+  const nameInput = document.getElementById("dc-save-name");
+  const err = document.getElementById("dc-save-error");
+  const confirmBtn = document.getElementById("dc-save-modal-confirm");
+  let name = (nameInput?.value || "").trim();
+  if (!name) {
+    name = buildDcSuggestedSaveName(dcOverview);
+    if (nameInput) nameInput.value = name;
+  }
+  if (!name) {
+    if (err) {
+      err.hidden = false;
+      err.textContent = "请填写数据集名称";
+    }
+    return;
+  }
+  if (err) {
+    err.hidden = true;
+    err.textContent = "";
+  }
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "导出中…";
+  }
+  try {
+    const res = await api(`/datasets/${dcCurrentId}/clean/export-dataset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, build_vectors: true }),
+    });
+    closeDcSaveModal();
+    toast(
+      `已导出到数据集库 #${res.dataset_id}「${res.name}」（${res.row_count} 条，仅 id 引用不复制全文），可在数据集库下载`
+    );
+    try {
+      dcDatasetCache = (await api("/datasets")) || [];
+    } catch (_) {
+      /* ignore */
+    }
+    refreshDcSaveNameDefault(dcOverview);
+  } catch (e) {
+    if (err) {
+      err.hidden = false;
+      err.textContent = e.message || "导出失败";
+    }
+    toast(e.message || "导出失败", true);
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "确认导出";
+    }
+  }
+}
+
+async function selectDcDataset(id) {
+  const tid = +id;
+  if (!tid) return;
+  dcCurrentId = tid;
+  dcLastPreview = null;
+  dcInvertApplied = false;
+  dcAppliedScoreThreshold = null;
+  updateDcSelectedLabel();
+  const status = document.getElementById("dc-status");
+  if (status) status.textContent = "载入中…";
+  try {
+    await loadDcOverview();
+    syncDcInvertButton();
+    syncDcApplyScoreButton();
+    toast(`已载入数据集 #${tid}`);
+  } catch (e) {
+    if (status) status.textContent = "载入失败";
+    syncDcInvertButton();
+    syncDcApplyScoreButton();
+    throw e;
+  }
+}
+
+async function initDataCleanPage() {
+  const form = document.querySelector("#view-data-clean .dss-form-card");
+  if (!form) return;
+  try {
+    dcDatasetCache = (await api("/datasets")) || [];
+  } catch (e) {
+    dcDatasetCache = [];
+    toast(e.message || "加载数据集失败", true);
+  }
+  updateDcSelectedLabel();
+  dcUpdateMethodUI();
+  if (dcCurrentId && dcDatasetCache.some((d) => d.id === dcCurrentId)) {
+    await selectDcDataset(dcCurrentId);
+  } else if (dcDatasetCache.length) {
+    await selectDcDataset(dcDatasetCache[0].id);
+  } else {
+    dcCurrentId = null;
+    updateDcSelectedLabel();
+    const status = document.getElementById("dc-status");
+    if (status) status.textContent = "请先在数据集库创建数据集";
+  }
+}
+
+function flashButton(btn, kind = "ok", ms = 700) {
+  if (!btn) return;
+  const cls = kind === "err" ? "btn-flash-err" : "btn-flash-ok";
+  btn.classList.remove("btn-flash-ok", "btn-flash-err");
+  // 强制重触发动画/样式
+  void btn.offsetWidth;
+  btn.classList.add(cls);
+  if (btn._flashTimer) clearTimeout(btn._flashTimer);
+  btn._flashTimer = setTimeout(() => {
+    btn.classList.remove("btn-flash-ok", "btn-flash-err");
+    btn._flashTimer = null;
+  }, ms);
+}
+
+/**
+ * 按清洗条件预览匹配。
+ * 向量/大模型：返回带分全量结果，默认全不选；结果阈值/反选仅本地操作。
+ */
+async function previewDcMatch() {
+  if (!dcCurrentId) {
+    toast("请先选择数据集", true);
+    return;
+  }
+  const btn = document.getElementById("btn-dc-preview");
+  // 预览不带 invert；反选只做本地勾选取反
+  const body = collectDcMatchBody({ invert: false });
+  // 允许空条件：匹配全部生效样本
+  const status = document.getElementById("dc-status");
+  if (status) status.textContent = "匹配中…";
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset._label = btn.textContent || "预览匹配";
+    btn.textContent = "匹配中…";
+  }
+  try {
+    const res = await api(`/datasets/${dcCurrentId}/clean/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    dcLastPreview = res;
+    dcInvertApplied = false;
+    // 新预览：阈值需重新点「应用阈值」才生效
+    dcAppliedScoreThreshold = null;
+    dcViewingOpId = null;
+    setDcDiffRestoreButton(null, false);
+    const titleEl = document.getElementById("dc-result-title");
+    const empty = !body.query;
+    if (titleEl) {
+      titleEl.textContent = empty ? "匹配全部（空条件）" : "匹配结果";
+    }
+    setDcResultBadge(empty ? "default" : "", empty ? "全部" : "结果");
+    const rows = res.selected || res.preview || [];
+    const scored = dcMethodNeedsScoreFilter();
+    setDcClientRows(rows, {
+      mode: "match",
+      selectable: true,
+      selectedMark: false,
+      total: res.selected_count ?? rows.length,
+      // 关键词/正则：默认勾选全部匹配；TF-IDF/BGE/大模型：默认全不选
+      selectAll: !scored,
+    });
+    if (status) {
+      status.hidden = true;
+      status.textContent = "";
+    }
+    {
+      const selN = dcMatchSelectedIds.size;
+      const totN = (dcResultState.hits || []).length || res.selected_count || 0;
+      if (scored) {
+        toast(
+          `预览完成：共 ${totN} 条带分结果 · 默认未选中，请输入阈值后点「应用阈值」`
+        );
+      } else if (empty) {
+        toast(`空条件预览：结果 ${totN} · 选中 ${selN}`);
+      } else {
+        toast(`预览：结果 ${totN} · 选中 ${selN}`);
+      }
+    }
+    syncDcInvertButton();
+    syncDcApplyScoreButton();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset._label || "预览匹配";
+      flashButton(btn, "ok", 700);
+    }
+  } catch (e) {
+    if (status) {
+      status.hidden = false;
+      status.textContent = "失败";
+    }
+    toast(e.message, true);
+    syncDcInvertButton();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset._label || "预览匹配";
+      flashButton(btn, "err", 700);
+    }
+  }
+}
+
+/**
+ * 对「当前结果列表」的勾选取反（本地瞬间完成，不请求后端、不重跑条件）。
+ * 例：阈值选中 score≥0.6 的 4 条 → 反选 = 选中其余（通常即 score&lt;0.6）。
+ * 再点一次再取反，恢复上一批勾选。
+ */
+function invertDcSelection() {
+  if (
+    !dcResultState.selectable ||
+    (dcResultState.mode !== "match" && dcResultState.mode !== "browse")
+  ) {
+    toast("当前列表不可勾选", true);
+    return;
+  }
+  const hits = dcResultState.hits || [];
+  if (!hits.length) {
+    toast("当前没有可反选的结果", true);
+    return;
+  }
+  const allIds = hits
+    .map((r) => (r.id != null ? String(r.id) : ""))
+    .filter(Boolean);
+  const next = new Set();
+  for (const id of allIds) {
+    if (!dcMatchSelectedIds.has(id)) next.add(id);
+  }
+  dcMatchSelectedIds = next;
+  dcInvertApplied = !dcInvertApplied;
+  const titleEl = document.getElementById("dc-result-title");
+  if (titleEl) {
+    titleEl.textContent = dcInvertApplied ? "匹配结果（已反选）" : "匹配结果";
+  }
+  setDcResultBadge("", dcInvertApplied ? "反选" : "结果");
+  renderDcTablePage();
+  syncDcInvertButton();
+  syncDcApplyScoreButton();
+  const thr = getDcScoreThreshold();
+  const thrHint =
+    thr != null && dcMethodNeedsScoreFilter()
+      ? dcInvertApplied
+        ? `（相对已应用阈值≥${thr} 的补集）`
+        : ""
+      : "";
+  toast(`反选完成：选中 ${dcMatchSelectedIds.size} / ${allIds.length}${thrHint}`);
+  flashButton(document.getElementById("btn-dc-invert"), "ok", 500);
+}
+
+async function applyDcDelete() {
+  if (!dcCurrentId) {
+    toast("请先选择数据集", true);
+    return;
+  }
+  const body = collectDcMatchBody();
+  // 勾选优先：匹配预览 或 无条件浏览均可
+  let selectedIds = [];
+  if (
+    dcResultState.selectable &&
+    (dcResultState.mode === "match" || dcResultState.mode === "browse") &&
+    dcMatchSelectedIds &&
+    dcMatchSelectedIds.size > 0
+  ) {
+    selectedIds = Array.from(dcMatchSelectedIds);
+  } else if (dcLastPreview?.selected_ids?.length) {
+    selectedIds = dcLastPreview.selected_ids.map(String);
+  }
+  if (!selectedIds.length) {
+    toast("没有勾选要删除的样本（深色=勾选，点击行可切换；无需先填条件）", true);
+    return;
+  }
+  // 删除选中 = 从生效集移除 id + 写入 diff 进度；不二次确认
+  body.selected_ids = selectedIds;
+  // 无条件浏览勾选时，不强制走匹配条件
+  if (dcResultState.mode === "browse" && !dcLastPreview) {
+    body.method = "manual";
+    body.query = "";
+    body.invert = false;
+  }
+  const btn = document.getElementById("btn-dc-apply");
+  const status = document.getElementById("dc-status");
+  if (status) {
+    status.hidden = true;
+    status.textContent = "";
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset._label = btn.textContent || "删除选中";
+    btn.textContent = "删除中…";
+  }
+  try {
+    const res = await api(`/datasets/${dcCurrentId}/clean/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const opId = res.op?.id || "";
+    toast(
+      `已删除 ${res.deleted_this_op} 条并保存进度（#${opId}），可在历史中查看 diff / 回退`
+    );
+    // 清空清洗条件，进入新一轮；右侧恢复「无条件」生效样本列表
+    clearDcFormForNextRound();
+    dcViewingOpId = null;
+    await loadDcOverview();
+    if (btn) flashButton(btn, "ok", 700);
+  } catch (e) {
+    if (btn) flashButton(btn, "err", 700);
+    if (status) {
+      status.hidden = false;
+      status.textContent = "失败";
+    }
+    toast(e.message, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset._label || "删除选中";
+    }
+  }
+}
+
+async function restoreDcOp(opId) {
+  if (!dcCurrentId || !opId) return;
+  // 不二次确认；回退后新增一条 diff 历史并回到无条件列表
+  const status = document.getElementById("dc-status");
+  if (status) {
+    status.hidden = true;
+    status.textContent = "";
+  }
+  try {
+    const res = await api(
+      `/datasets/${dcCurrentId}/clean/ops/${encodeURIComponent(opId)}/restore`,
+      { method: "POST" }
+    );
+    toast(`已回退 ${res.restored_count || 0} 条（新增历史 #${res.op_id || ""}）`);
+    dcLastPreview = null;
+    dcViewingOpId = null;
+    clearDcFormForNextRound();
+    // 无条件数据展示
+    await loadDcOverview();
+  } catch (e) {
+    if (status) {
+      status.hidden = false;
+      status.textContent = "失败";
+    }
+    toast(e.message, true);
+  }
+}
+
+/** @deprecated 界面改用「导出到数据集库」；保留 CSV 下载函数供调试 */
+async function downloadDcEffective() {
+  openDcExportDatasetModal();
+}
+
+document.getElementById("dc-method")?.addEventListener("change", () =>
+  dcUpdateMethodUI()
+);
+// 结果阈值：仅点「应用阈值」生效，输入过程不自动筛选
+document.getElementById("btn-dc-apply-score")?.addEventListener("click", () => {
+  try {
+    applyDcScoreThreshold();
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+});
+document.getElementById("dc-min-score")?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  try {
+    applyDcScoreThreshold();
+  } catch (err) {
+    toast(err.message || String(err), true);
+  }
+});
+document.getElementById("btn-dc-pick-ds")?.addEventListener("click", () =>
+  openDcDatasetModal()
+);
+document.getElementById("dc-ds-selected")?.addEventListener("click", () =>
+  openDcDatasetModal()
+);
+document.getElementById("dc-ds-modal-cancel")?.addEventListener("click", () =>
+  closeDcDatasetModal()
+);
+document.getElementById("dc-ds-modal")?.addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) closeDcDatasetModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const modal = document.getElementById("dc-ds-modal");
+  if (modal && !modal.hidden) closeDcDatasetModal();
+});
+document.getElementById("dc-ds-q")?.addEventListener("input", (e) => {
+  dcDsQuery = e.target.value || "";
+  if (dcDsQueryTimer) clearTimeout(dcDsQueryTimer);
+  dcDsQueryTimer = setTimeout(() => renderDcDatasetList(), 150);
+});
+document.getElementById("btn-dc-preview")?.addEventListener("click", () => {
+  previewDcMatch().catch((e) => toast(e.message, true));
+});
+document.getElementById("btn-dc-invert")?.addEventListener("click", () => {
+  try {
+    invertDcSelection();
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+});
+document.getElementById("btn-dc-apply")?.addEventListener("click", () => {
+  applyDcDelete().catch((e) => toast(e.message, true));
+});
+document.getElementById("btn-dc-export")?.addEventListener("click", () => {
+  openDcExportDatasetModal();
+});
+document.getElementById("dc-save-modal-cancel")?.addEventListener("click", () => {
+  closeDcSaveModal();
+});
+document.getElementById("dc-save-modal")?.addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) closeDcSaveModal();
+});
+document.getElementById("form-dc-save")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  exportDcToLibraryFromModal().catch((err) => toast(err.message, true));
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const modal = document.getElementById("dc-save-modal");
+  if (modal && !modal.hidden) closeDcSaveModal();
+});
+document.getElementById("btn-dc-diff-restore")?.addEventListener("click", () => {
+  const id = document.getElementById("btn-dc-diff-restore")?.dataset?.opId;
+  if (id) restoreDcOp(id).catch((e) => toast(e.message, true));
+});
+document.getElementById("dc-page-prev")?.addEventListener("click", () => {
+  dcGoPage(dcPage - 1).catch((e) => toast(e.message, true));
+});
+document.getElementById("dc-page-next")?.addEventListener("click", () => {
+  dcGoPage(dcPage + 1).catch((e) => toast(e.message, true));
+});
+document.getElementById("dc-page-size")?.addEventListener("change", (e) => {
+  dcPageSize = +(e.target.value || 50) || 50;
+  dcPage = 1;
+  if (dcResultState.mode === "browse" && dcResultState._serverPage) {
+    loadDcBrowsePage().catch((err) => toast(err.message, true));
+  } else {
+    renderDcTablePage();
+  }
 });
 
 document.getElementById("pd-prompt-editor")?.addEventListener("input", (e) => {
@@ -1507,18 +4541,64 @@ document.getElementById("pd-change-reason")?.addEventListener("input", (e) => {
 });
 
 document.getElementById("btn-pd-save")?.addEventListener("click", async () => {
-  if (!currentJobId) {
-    toast("请先打开或新建一个提示词调试任务", true);
-    return;
-  }
   const editor = document.getElementById("pd-prompt-editor");
   const reasonEl = document.getElementById("pd-change-reason");
   const text = (editor?.value || "").trim();
-  if (!text) {
-    toast("提示词不能为空", true);
+  const reason = (reasonEl?.value || "").trim() || "提示词调试修改";
+
+  // 草稿：先弹名称设置框 → 再创建 Job（SQL）+ Prompt v1
+  if (!currentJobId || pdDraftMode) {
+    if (!text) {
+      toast("提示词不能为空", true);
+      return;
+    }
+    const defaultName = pdDraftDefaultName || defaultPromptDebugName();
+    const name = await askPromptDebugJobName({
+      title: "设置任务名称",
+      defaultName,
+      confirmLabel: "确认并保存版本",
+      hint: "首次保存将创建任务并写入数据库；留空则使用默认名称",
+    });
+    if (name == null) return; // 用户取消
+    try {
+      const job = await api("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          job_type: "prompt_debug",
+          policy_rules: name,
+          initial_prompt: text,
+          seed_change_reason: reason,
+        }),
+      });
+      currentJobId = job.id;
+      pdDraftMode = false;
+      pdLoadedJobName = (job.name || name).trim();
+      pdDraftDefaultName = "";
+      if (editor) {
+        editor.dataset.dirty = "0";
+        editor.dataset.loadedVersion = `1:${text.length}`;
+      }
+      if (reasonEl) {
+        reasonEl.dataset.dirty = "0";
+        reasonEl.value = "";
+      }
+      toast(`已创建任务 #${job.id} 并保存 v1`);
+      await loadPromptDebugWorkbench(job);
+      loadJobs().catch(() => {});
+    } catch (e) {
+      toast(e.message, true);
+    }
     return;
   }
+
+  // 已有任务：只保存新 Prompt 版本（改名用顶部「改名」/点名称）
   try {
+    if (!text) {
+      toast("提示词不能为空", true);
+      return;
+    }
     const versions = await api(`/jobs/${currentJobId}/prompt-versions`);
     const active =
       versions.find((v) => v.is_active) || versions[versions.length - 1];
@@ -1526,7 +4606,6 @@ document.getElementById("btn-pd-save")?.addEventListener("click", async () => {
       toast("与当前版本无差异，未保存", true);
       return;
     }
-    const reason = (reasonEl?.value || "").trim() || "提示词调试修改";
     const pv = await api(`/jobs/${currentJobId}/prompt-versions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1544,10 +4623,8 @@ document.getElementById("btn-pd-save")?.addEventListener("click", async () => {
       reasonEl.value = "";
     }
     toast(`已保存 v${pv.version}`);
-    // 强制重载编辑器为最新激活版
-    const editor2 = document.getElementById("pd-prompt-editor");
-    if (editor2) editor2.dataset.dirty = "0";
     await loadPromptDebugWorkbench();
+    loadJobs().catch(() => {});
   } catch (e) {
     toast(e.message, true);
   }
@@ -1556,7 +4633,7 @@ document.getElementById("btn-pd-save")?.addEventListener("click", async () => {
 /**
  * 从各任务类型模块快速创建 Job（统一进 Job 列表）
  * @param {string} jobType
- * @param {{ name?: string }} [opts] 若传入 name 则不再弹窗（提示词调试页用输入框）
+ * @param {{ name?: string }} [opts] 若传入 name 则使用该名称；提示词调试不传则自动命名
  */
 async function createTypedJob(jobType, opts = {}) {
   const meta = JOB_TYPE_META[jobType] || JOB_TYPE_META.annotation;
@@ -1566,15 +4643,15 @@ async function createTypedJob(jobType, opts = {}) {
     .replace("T", " ")}`;
   let trimmed = String(opts.name ?? "").trim();
   if (!trimmed) {
-    // 未从页面输入框传入名称时，再弹窗（清洗台等占位入口）
-    if (opts.name != null && jobType === "prompt_debug") {
-      toast("请填写新建任务名称", true);
-      document.getElementById("prompt-debug-new-name")?.focus();
-      return;
+    // 提示词调试：直接用时间戳默认名，不再弹窗/填表
+    if (jobType === "prompt_debug") {
+      trimmed = defaultName;
+    } else {
+      // 清洗台等占位入口仍弹窗命名
+      const name = window.prompt(`新建${meta.label}任务名称：`, defaultName);
+      if (name == null) return;
+      trimmed = String(name).trim();
     }
-    const name = window.prompt(`新建${meta.label}任务名称：`, defaultName);
-    if (name == null) return;
-    trimmed = String(name).trim();
   }
   if (!trimmed) {
     toast("名称不能为空", true);
@@ -1595,8 +4672,7 @@ async function createTypedJob(jobType, opts = {}) {
     body.initial_prompt = "";
   }
   if (jobType === "annotation") {
-    goView("create");
-    toast("请搜索并点选模板，以创建数据标注任务");
+    await enterAnnotationWorkbench();
     return;
   }
   const job = await api("/jobs", {
@@ -1618,15 +4694,16 @@ document.querySelectorAll(".btn-create-typed-job").forEach((btn) => {
 
 document.getElementById("btn-back").onclick = () => {
   if (pollTimer) clearInterval(pollTimer);
-  const wasPromptDebug = document
-    .getElementById("view-prompt-debug")
-    ?.classList.contains("active");
   currentJobId = null;
+  pdDraftMode = false;
+  pdLoadedJobName = "";
+  pdDraftDefaultName = "";
+  closePdNameModal?.(null);
   resetSidebarOverlays();
   collapsePdDiff?.();
   collapsePdReasonExpand?.();
-  // 标注详情 → 数据标注；提示词调试 → 模板库任务列表
-  goView(wasPromptDebug ? "templates" : "create");
+  // 仅提示词调试使用返回；标注请用顶栏「Job 列表」
+  goView("templates");
 };
 
 /** 状态副标题：人工介入中展示当前子步骤 */

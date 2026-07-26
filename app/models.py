@@ -275,3 +275,82 @@ class EventLog(Base):
     event: Mapped[str] = mapped_column(String(128), index=True)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ManagedDataset(Base):
+    """数据集元数据（SQL 只存目录信息，样本在训练文件包中）。
+
+    在线主路径 = 文件系统训练包::
+
+        data/datasets/{id}/data.jsonl   # 训练首选
+        data/datasets/{id}/data.csv
+        data/datasets/{id}/manifest.json
+        data/datasets/{id}/vectors/     # 向量索引
+        data/datasets/{id}/media/       # 图片等二进制
+        data/datasets/{id}/raw/         # 原始上传
+
+    SQL 不作为训练读数据路径；便于后续换 PG 只迁元数据。
+    """
+
+    __tablename__ = "managed_datasets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # text | image | audio | video
+    modality: Mapped[str] = mapped_column(String(32), default="text", index=True)
+    # 来源上传格式
+    file_format: Mapped[str] = mapped_column(String(32), default="csv")
+    original_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # files = 训练包（JSONL/CSV）；兼容旧值 sql
+    storage_backend: Mapped[str] = mapped_column(String(32), default="files", index=True)
+    # 包根目录相对 DATA_DIR 或绝对路径
+    root_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    raw_archive_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # 旧版兼容
+    storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_id_column: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_text_column: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    id_column: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    text_column: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    column_count: Mapped[int] = mapped_column(Integer, default=0)
+    columns: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 向量索引状态
+    vector_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    vector_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    vector_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vector_count: Mapped[int] = mapped_column(Integer, default=0)
+    # ready | empty | error | indexing
+    status: Mapped[str] = mapped_column(String(32), default="empty", index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ManagedDatasetRow(Base):
+    """旧版 SQL 样本行（兼容迁移；新数据不再写入）。"""
+
+    __tablename__ = "managed_dataset_rows"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "seq", name="uq_dataset_row_seq"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("managed_datasets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, index=True
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
