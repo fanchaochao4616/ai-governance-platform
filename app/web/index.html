@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>内容风控标注平台 v0.5</title>
+  <link rel="icon" href="/static/logo-shield.png" type="image/png" />
+  <link rel="shortcut icon" href="/static/logo-shield.png" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script>
+    /* 尽早应用主题，避免闪烁 */
+    (function () {
+      try {
+        var t = localStorage.getItem("ui_theme");
+        if (t !== "light" && t !== "dark") t = "dark";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+</head>
+<body>
+  <!-- 登录遮罩 -->
+  <div id="login-overlay" class="login-overlay" hidden>
+    <form id="form-login" class="login-card card">
+      <h2>账号登录</h2>
+      <p class="hint">内部账号，数据保存在本地 SQLite</p>
+      <label>用户名 <input name="username" required autocomplete="username" placeholder="admin" /></label>
+      <label>密码 <input name="password" type="password" required autocomplete="current-password" /></label>
+      <button type="submit">登录</button>
+      <p id="login-error" class="login-error" hidden></p>
+    </form>
+  </div>
+
+  <!-- 修改密码弹层 -->
+  <div id="pwd-modal" class="modal-overlay" hidden>
+    <form id="form-change-pwd" class="login-card card">
+      <h2>修改密码</h2>
+      <label>原密码 <input name="old_password" type="password" required /></label>
+      <label>新密码 <input name="new_password" type="password" required minlength="6" placeholder="至少 6 位" /></label>
+      <label>确认新密码 <input name="new_password2" type="password" required minlength="6" /></label>
+      <div class="tmpl-create-actions">
+        <button type="submit">确认修改</button>
+        <button type="button" id="btn-pwd-cancel" class="secondary">取消</button>
+      </div>
+      <p id="pwd-error" class="login-error" hidden></p>
+    </form>
+  </div>
+
+  <div class="app-shell" id="app-shell">
+    <!-- 左侧可收起导航 -->
+    <aside class="sidenav" id="sidenav" aria-label="主导航">
+      <div class="sidenav-head">
+        <div class="sidenav-brand" title="内容风控数据平台">
+          <img
+            class="sidenav-logo-img"
+            src="/static/logo-shield.png"
+            width="36"
+            height="36"
+            alt="风控护盾"
+            title="坚固护盾 · 蜂窝结构"
+          />
+          <span class="sidenav-brand-text">数据平台 <span class="ver">v0.5</span></span>
+        </div>
+        <button type="button" id="btn-sidenav-toggle" class="sidenav-toggle" title="收起导航" aria-label="收起导航" aria-expanded="true">
+          <!-- 默认 ←；.sidenav.collapsed 时 CSS 翻转为 → -->
+          <svg class="sidenav-toggle-arrow" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M14.5 5.5L8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <nav class="sidenav-nav" id="sidenav-nav">
+        <!-- 一级：统一 Job 列表（所有类型任务，便于恢复） -->
+        <div class="sidenav-group sidenav-group-primary" data-module="jobs">
+          <div class="sidenav-group-body">
+            <button type="button" class="sidenav-item active" data-view="jobs" title="Job 列表 · 全部任务">
+              <span class="sidenav-ico" aria-hidden="true">☰</span>
+              <span class="sidenav-label">Job 列表</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 以下为任务类型：新建/进入对应工作台，创建的 Job 都进 Job 列表 -->
+        <div class="sidenav-group" data-module="annotate">
+          <div class="sidenav-group-head" title="数据标注">
+            <span class="sidenav-ico" aria-hidden="true">✎</span>
+            <span class="sidenav-label sidenav-group-name">数据标注</span>
+          </div>
+          <div class="sidenav-group-body">
+            <button type="button" class="sidenav-item" data-view="create" data-job-type="annotation" title="数据标注 · 模板建任务 / 任务列表">
+              <span class="sidenav-ico" aria-hidden="true">✎</span>
+              <span class="sidenav-label">数据标注</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidenav-group" data-module="prompt">
+          <div class="sidenav-group-head" title="提示词调试">
+            <span class="sidenav-ico" aria-hidden="true">◈</span>
+            <span class="sidenav-label sidenav-group-name">提示词调试</span>
+          </div>
+          <div class="sidenav-group-body">
+            <button type="button" class="sidenav-item" data-view="templates" title="提示词调试">
+              <span class="sidenav-ico" aria-hidden="true">◈</span>
+              <span class="sidenav-label">提示词调试</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidenav-group" data-module="clean">
+          <div class="sidenav-group-head" title="数据清洗">
+            <span class="sidenav-ico" aria-hidden="true">🧹</span>
+            <span class="sidenav-label sidenav-group-name">数据清洗</span>
+          </div>
+          <div class="sidenav-group-body">
+            <button type="button" class="sidenav-item" data-view="data-clean" data-job-type="data_clean" title="数据清洗 · 可建任务">
+              <span class="sidenav-ico" aria-hidden="true">🧹</span>
+              <span class="sidenav-label">清洗台</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidenav-group" data-module="search">
+          <div class="sidenav-group-head" title="数据库检索">
+            <span class="sidenav-ico" aria-hidden="true">🔍</span>
+            <span class="sidenav-label sidenav-group-name">数据库检索</span>
+          </div>
+          <div class="sidenav-group-body">
+            <button type="button" class="sidenav-item" data-view="data-search" data-job-type="data_search" title="数据库检索 · 可建任务">
+              <span class="sidenav-ico" aria-hidden="true">🔍</span>
+              <span class="sidenav-label">检索台</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidenav-group" data-module="generate">
+          <div class="sidenav-group-head" title="数据生成">
+            <span class="sidenav-ico" aria-hidden="true">✦</span>
+            <span class="sidenav-label sidenav-group-name">数据生成</span>
+          </div>
+          <div class="sidenav-group-body">
+            <button type="button" class="sidenav-item" data-view="data-generate" data-job-type="data_generate" title="数据生成 · 可建任务">
+              <span class="sidenav-ico" aria-hidden="true">✦</span>
+              <span class="sidenav-label">生成台</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidenav-group" data-module="llm-mine">
+          <div class="sidenav-group-head" title="大模型挖掘">
+            <span class="sidenav-ico" aria-hidden="true">⬡</span>
+            <span class="sidenav-label sidenav-group-name">大模型挖掘</span>
+          </div>
+          <div class="sidenav-group-body">
+            <button type="button" class="sidenav-item" data-view="llm-mine" data-job-type="llm_mine" title="大模型挖掘 · 可建任务">
+              <span class="sidenav-ico" aria-hidden="true">⬡</span>
+              <span class="sidenav-label">挖掘台</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+    </aside>
+
+    <div class="app-right">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="btn-back" class="topbar-back secondary" type="button" hidden>← 返回列表</button>
+          <span id="topbar-title" class="topbar-title">Jobs</span>
+        </div>
+        <div class="topbar-right">
+          <button type="button" class="top-link" data-view="settings" id="btn-settings" title="系统设置">系统设置</button>
+          <div class="user-menu-wrap">
+            <button type="button" class="user-chip" title="当前用户" id="user-chip">
+              <span class="user-avatar" id="user-avatar" aria-hidden="true">用</span>
+              <span class="user-meta">
+                <span class="user-name" id="user-name">—</span>
+                <span class="user-role" id="user-role">—</span>
+              </span>
+            </button>
+            <div id="user-dropdown" class="user-dropdown" hidden>
+              <button type="button" id="btn-change-pwd" class="user-dd-item">修改密码</button>
+              <button type="button" id="btn-logout" class="user-dd-item danger">退出登录</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main id="app-main">
+    <section id="view-jobs" class="view active">
+      <div class="jobs-type-bar" id="jobs-type-filter" role="tablist" aria-label="按任务类型查看">
+        <div class="jobs-type-chips">
+          <button type="button" class="jobs-type-chip active" data-type="annotation">数据标注</button>
+          <button type="button" class="jobs-type-chip" data-type="prompt_debug">提示词调试</button>
+          <button type="button" class="jobs-type-chip" data-type="data_clean">数据清洗</button>
+          <button type="button" class="jobs-type-chip" data-type="data_search">数据库检索</button>
+          <button type="button" class="jobs-type-chip" data-type="data_generate">数据生成</button>
+          <button type="button" class="jobs-type-chip" data-type="llm_mine">大模型挖掘</button>
+        </div>
+        <button id="btn-delete-jobs" class="jobs-type-chip jobs-delete-chip" type="button" disabled title="永久删除选中的 Job">
+          删除选中
+        </button>
+      </div>
+      <div id="jobs-table" class="card"></div>
+    </section>
+
+    <section id="view-create" class="view">
+      <div class="create-layout create-layout-hub">
+        <div class="create-main create-main-full">
+          <div class="card form create-main-card create-tmpl-card">
+            <div class="tmpl-pick tmpl-pick-top">
+              <label>从模板导入新任务</label>
+              <div class="tmpl-search-row">
+                <input type="search" id="job-tmpl-q" placeholder="搜索模板名称，点选后创建新任务…" autocomplete="off" />
+              </div>
+              <div id="job-tmpl-results" class="job-tmpl-results" hidden></div>
+              <div id="job-tmpl-selected" class="job-tmpl-selected" hidden>
+                <span id="job-tmpl-selected-label"></span>
+                <button type="button" id="btn-job-tmpl-clear" class="secondary">清除</button>
+              </div>
+              <input type="hidden" id="job-tmpl-id" value="" />
+            </div>
+          </div>
+
+          <div class="create-jobs-block">
+            <div class="jobs-toolbar create-jobs-toolbar">
+              <div class="create-jobs-search-row create-jobs-search-row-full">
+                <input
+                  type="search"
+                  id="create-jobs-q"
+                  placeholder="搜索历史任务：名称 / ID / 状态…"
+                  autocomplete="off"
+                />
+              </div>
+            </div>
+            <div id="create-jobs-table" class="card"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-detail" class="view">
+      <div class="detail-layout">
+        <!-- 中间信息展示区：①阈值分层 ②QC 决策 ③Prompt 时间线 -->
+        <div class="detail-main">
+          <!-- 第一栏：判定阈值与置信度分层（紧凑、不滚动） -->
+          <div class="card detail-main-threshold">
+            <div class="thr-title-row">
+              <h3>判定阈值与置信度分层</h3>
+              <span id="threshold-result" class="thr-result-inline hint"></span>
+              <div class="threshold-actions-row">
+                <label class="tm-input inline-qc-quota">QC
+                  <input id="qc-per-bin" type="number" value="20" min="1" />
+                </label>
+                <label class="tm-input inline-round-field">from_round
+                  <input id="fin-from" type="number" value="1" min="1" />
+                </label>
+                <label class="tm-input inline-round-field">to_round
+                  <input id="fin-to" type="number" value="1" min="1" />
+                </label>
+                <button id="btn-recommend-bins" class="secondary" type="button">推荐</button>
+                <button id="btn-apply-threshold" type="button">应用阈值</button>
+                <button id="btn-apply-bins" type="button">应用分层并抽 QC</button>
+              </div>
+            </div>
+            <div class="thr-split-row">
+              <div class="thr-block thr-col">
+                <div class="thr-row">
+                  <span class="thr-label">判定阈值</span>
+                  <span class="thr-val" id="decision-threshold-label">0≤0.50 · 1</span>
+                </div>
+                <div class="layer-bar-wrap thr-decision-bar">
+                  <div class="layer-bar-track" id="thr-bar-track">
+                    <div class="layer-seg thr-seg-neg" id="thr-seg-neg"></div>
+                    <div class="layer-seg thr-seg-pos" id="thr-seg-pos"></div>
+                  </div>
+                  <div class="layer-dual-sliders">
+                    <input
+                      type="range"
+                      id="decision-threshold-input"
+                      class="layer-range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value="0.50"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div class="thr-block thr-col">
+                <div class="thr-row">
+                  <span class="thr-label">分层切点</span>
+                  <span class="thr-val" id="layer-cuts-label">Low≤0.50 · Med≤0.85 · High</span>
+                </div>
+                <div class="layer-bar-wrap">
+                  <div class="layer-bar-track" id="layer-bar-track">
+                    <div class="layer-seg layer-low" id="layer-seg-low"></div>
+                    <div class="layer-seg layer-med" id="layer-seg-med"></div>
+                    <div class="layer-seg layer-high" id="layer-seg-high"></div>
+                  </div>
+                  <div class="layer-dual-sliders">
+                    <input type="range" id="layer-cut-low" class="layer-range" min="0.01" max="0.98" step="0.01" value="0.50" />
+                    <input type="range" id="layer-cut-high" class="layer-range" min="0.02" max="0.99" step="0.01" value="0.85" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 信息展示栏：QC 审查 + 当前提示词（底部可编辑） -->
+          <div class="card detail-main-qc">
+            <div class="qc-prompt-head">
+              <h3>QC 审查与 Prompt 优化</h3>
+              <div class="qc-prompt-head-actions">
+                <button type="button" id="btn-show-qc" class="secondary">显示 QC</button>
+                <button type="button" id="btn-prompt-history" class="secondary">历史版本</button>
+              </div>
+            </div>
+            <div class="qc-decision-actions">
+              <button id="btn-submit-qc" type="button">提交 QC</button>
+              <span class="dec-range-label">重新标注范围</span>
+              <label class="inline-round-field">from
+                <input id="dec-range-from" type="text" value="Low" placeholder="Low" list="dec-range-layers" />
+              </label>
+              <label class="inline-round-field">to
+                <input id="dec-range-to" type="text" value="Medium" placeholder="Medium" list="dec-range-layers" />
+              </label>
+              <datalist id="dec-range-layers">
+                <option value="Low"></option>
+                <option value="Medium"></option>
+                <option value="High"></option>
+              </datalist>
+              <button id="btn-decision" type="button">重新标注</button>
+            </div>
+            <!-- 最底部：当前最新 Prompt（质检大模型迭代 / 可人工改） -->
+            <div class="active-prompt-block">
+              <div class="active-prompt-head">
+                <label class="active-prompt-label" for="active-prompt-editor">提示词修改</label>
+                <span id="active-prompt-ver" class="active-prompt-ver hint">—</span>
+              </div>
+              <p class="hint active-prompt-subhint">
+                展示<strong>当前激活版本</strong>全文；有改动时点「保存」写入历史版本。
+              </p>
+              <textarea
+                id="active-prompt-editor"
+                class="active-prompt-editor"
+                rows="6"
+                placeholder="加载当前激活 Prompt…"
+                spellcheck="false"
+              ></textarea>
+              <label class="change-reason-label" for="change-reason-input">修改说明</label>
+              <div class="change-reason-row">
+                <input
+                  type="text"
+                  id="change-reason-input"
+                  class="change-reason-input"
+                  placeholder="大模型优化后的修改说明 / 人工修改原因"
+                  maxlength="300"
+                />
+                <button type="button" id="btn-save-prompt" class="secondary">保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧设置栏：默认设置；显示 QC 时临时切换为样本详情 -->
+        <aside class="tmpl-sidebar card detail-sidebar" id="detail-sidebar">
+          <!-- 默认设置内容 -->
+          <div class="tmpl-meta-list" id="detail-settings-panels">
+            <div class="tmpl-meta-item create-param-item detail-side-status">
+              <div class="detail-sm-head">
+                <div class="tm-name">状态与进度</div>
+                <div class="detail-sm-actions">
+                  <button id="btn-abort-detail" class="btn-abort" type="button" title="中止当前进度（可恢复，非永久终止）">中止</button>
+                  <button id="btn-save-template" class="secondary" type="button">存模板</button>
+                </div>
+              </div>
+              <div id="detail-kpis" class="kpi-grid kpi-grid-side"></div>
+              <div id="gold-eval-panel" class="gold-eval-panel" hidden>
+                <div class="gold-eval-head">
+                  <span class="tm-name">Gold Test 明细</span>
+                  <button type="button" id="btn-hide-gold-eval" class="secondary">收起</button>
+                </div>
+                <div id="gold-eval-meta" class="hint gold-eval-meta"></div>
+                <div id="gold-eval-list" class="gold-eval-list"></div>
+              </div>
+              <div id="detail-kpi-progress" class="kpi-progress-wrap" hidden>
+                <div class="progress-label" id="detail-kpi-progress-label">—</div>
+                <div class="progress-bar">
+                  <div class="progress-fill" id="detail-kpi-progress-fill" style="width:0%"></div>
+                </div>
+              </div>
+              <div id="detail-kpi-msg" class="kpi-msg hint"></div>
+              <div id="detail-error" class="kpi-error" hidden></div>
+            </div>
+
+            <div class="tmpl-meta-item create-param-item detail-side-upload">
+              <div class="tm-name">数据上传与标注</div>
+              <p class="hint side-upload-hint">
+                选择文件后点「确认开始数据标注」会自动上传 Dataset 与 Gold，无需单独上传。
+              </p>
+              <div class="side-upload-row">
+                <div class="side-upload-col">
+                  <label class="tm-input">全量未标注
+                    <input type="file" id="file-dataset" accept=".csv,.xlsx,.xls" />
+                  </label>
+                </div>
+                <div class="side-upload-col">
+                  <label class="tm-input">初始 Gold Test Set
+                    <input type="file" id="file-gold" accept=".csv,.xlsx,.xls" />
+                  </label>
+                </div>
+              </div>
+              <button id="btn-start-annotation" class="primary-lg side-action-btn" type="button">确认开始数据标注</button>
+            </div>
+
+            <div class="tmpl-meta-item create-param-item detail-side-download">
+              <div class="tm-name">数据下载</div>
+              <button id="btn-export-xlsx" type="button" class="side-action-btn" title="需已完成全量标注；含 annotations / rounds / gold_test / meta">下载 Excel</button>
+              <button id="btn-export-csv" type="button" class="side-action-btn" title="需已完成全量标注；zip：annotations + rounds + gold_test + meta">下载 CSV zip</button>
+              <button id="btn-export-gold-xlsx" type="button" class="side-action-btn secondary" title="仅 Gold Test 金标集">下载 Gold Excel</button>
+              <button id="btn-export-gold-csv" type="button" class="side-action-btn secondary" title="仅 Gold Test 金标集">下载 Gold CSV</button>
+            </div>
+          </div>
+
+          <!-- 临时占用设置栏：QC 样本详情 -->
+          <div class="detail-qc-overlay" id="detail-qc-overlay" hidden>
+            <div class="detail-qc-overlay-head">
+              <div class="tm-name">QC 样本详情</div>
+              <button type="button" id="btn-hide-qc" class="secondary">关闭，返回设置</button>
+            </div>
+            <p class="hint qc-overlay-hint">点击正文显示判定依据，再点一次收起；点 label 按钮切换 0/1</p>
+            <div id="qc-panel" class="qc-panel-side"></div>
+          </div>
+
+          <!-- 临时占用设置栏：Prompt 历史版本（Diff + 修改说明） -->
+          <div class="detail-qc-overlay detail-history-overlay" id="detail-history-overlay" hidden>
+            <div class="detail-qc-overlay-head">
+              <div class="tm-name">Prompt 历史版本</div>
+              <button type="button" id="btn-hide-history" class="secondary">关闭，返回设置</button>
+            </div>
+            <p class="hint qc-overlay-hint">展示各版变更原因与 Diff（不含全文；全文在主栏底部编辑）</p>
+            <div id="prompt-history-panel" class="prompt-history-panel">
+              <div id="prompt-timeline" class="prompt-history-list"></div>
+            </div>
+            <div id="ph-reason-expand" class="ph-reason-expand" hidden></div>
+            <div id="diff-out" class="prompt-diff-view mono" hidden></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- 提示词调试：任务列表 + 搜索（无「从模板导入」） -->
+    <section id="view-templates" class="view">
+      <div class="create-layout create-layout-hub">
+        <div class="create-main create-main-full">
+          <div class="create-jobs-block">
+            <div class="jobs-toolbar create-jobs-toolbar pd-list-toolbar">
+              <div class="create-jobs-search-row">
+                <input
+                  type="search"
+                  id="prompt-debug-jobs-q"
+                  placeholder="搜索历史任务：名称 / ID / 状态…"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="pd-list-new-row">
+                <input
+                  type="text"
+                  id="prompt-debug-new-name"
+                  class="pd-list-new-name"
+                  placeholder="新建任务名称"
+                  autocomplete="off"
+                  maxlength="120"
+                />
+                <button type="button" id="btn-new-prompt-debug">新建</button>
+              </div>
+            </div>
+            <div id="prompt-debug-jobs-table" class="card"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 打开 / 新建 prompt_debug Job 后进入：左提示词 + 原因，右 Diff 历史 -->
+    <section id="view-prompt-debug" class="view">
+      <div class="pd-layout">
+        <div class="pd-main">
+          <div class="pd-main-head page-head">
+            <div class="pd-main-titles">
+              <span id="pd-job-meta" class="hint">未选中任务</span>
+            </div>
+            <div class="pd-main-actions page-head-actions">
+              <button type="button" id="btn-pd-back" class="secondary">返回任务列表</button>
+              <button type="button" id="btn-pd-save">保存版本</button>
+            </div>
+          </div>
+          <div class="pd-prompt-card card">
+            <div class="pd-prompt-head">
+              <span class="pd-section-label">提示词</span>
+              <span id="pd-active-ver" class="hint">—</span>
+            </div>
+            <textarea
+              id="pd-prompt-editor"
+              class="pd-prompt-editor"
+              spellcheck="false"
+              placeholder="当前激活提示词全文…"
+            ></textarea>
+            <div class="pd-reason-block">
+              <label class="pd-section-label" for="pd-change-reason">调试修改原因</label>
+              <input
+                type="text"
+                id="pd-change-reason"
+                class="pd-change-reason"
+                placeholder="本次调试修改说明（保存新版本时写入历史）"
+                maxlength="500"
+              />
+            </div>
+          </div>
+        </div>
+
+        <aside class="pd-sidebar card">
+          <div class="pd-sidebar-head">
+            <h3>Diff 历史记录</h3>
+          </div>
+          <div id="pd-history-list" class="pd-history-list"></div>
+          <div id="pd-diff-panel" class="pd-diff-panel" hidden>
+            <div class="pd-diff-head">
+              <div class="pd-diff-head-text">
+                <div id="pd-diff-caption" class="pd-diff-caption">—</div>
+                <div id="pd-diff-reason" class="pd-diff-reason" hidden title=""></div>
+              </div>
+              <div class="pd-diff-head-actions">
+                <button type="button" id="btn-pd-rollback-diff" class="secondary btn-pd-rollback-diff" hidden title="回退为当前激活版本">回退</button>
+                <button type="button" id="btn-pd-hide-diff" class="secondary btn-pd-hide-diff">收起</button>
+              </div>
+            </div>
+            <div id="pd-diff-out" class="pd-diff-out mono" role="region" aria-label="diff"></div>
+          </div>
+          <div id="pd-reason-expand" class="pd-reason-expand" hidden></div>
+        </aside>
+      </div>
+    </section>
+    <section id="view-data-clean" class="view">
+      <div class="page-head">
+        <h2 class="page-title">清洗台</h2>
+      </div>
+      <div class="module-placeholder card">
+        <div class="module-ph-icon" aria-hidden="true">🧹</div>
+        <p class="hint">去重、格式规范、敏感字段处理等。任务统一保存在 <strong>Job 列表</strong>。</p>
+        <p class="module-ph-status">功能建设中 · 可先建任务占位</p>
+        <div class="module-ph-actions">
+          <button type="button" class="btn-create-typed-job" data-job-type="data_clean">新建清洗任务</button>
+          <button type="button" class="secondary" data-goto="jobs">打开 Job 列表</button>
+        </div>
+      </div>
+    </section>
+    <section id="view-data-search" class="view">
+      <div class="page-head">
+        <h2 class="page-title">检索台</h2>
+      </div>
+      <div class="module-placeholder card">
+        <div class="module-ph-icon" aria-hidden="true">🔍</div>
+        <p class="hint">检索历史标注、Gold 与业务样本。任务统一保存在 <strong>Job 列表</strong>。</p>
+        <p class="module-ph-status">功能建设中 · 可先建任务占位</p>
+        <div class="module-ph-actions">
+          <button type="button" class="btn-create-typed-job" data-job-type="data_search">新建检索任务</button>
+          <button type="button" class="secondary" data-goto="jobs">打开 Job 列表</button>
+        </div>
+      </div>
+    </section>
+    <section id="view-data-generate" class="view">
+      <div class="page-head">
+        <h2 class="page-title">生成台</h2>
+      </div>
+      <div class="module-placeholder card">
+        <div class="module-ph-icon" aria-hidden="true">✦</div>
+        <p class="hint">规则或大模型生成合成样本 / 难例。任务统一保存在 <strong>Job 列表</strong>。</p>
+        <p class="module-ph-status">功能建设中 · 可先建任务占位</p>
+        <div class="module-ph-actions">
+          <button type="button" class="btn-create-typed-job" data-job-type="data_generate">新建生成任务</button>
+          <button type="button" class="secondary" data-goto="jobs">打开 Job 列表</button>
+        </div>
+      </div>
+    </section>
+    <section id="view-llm-mine" class="view">
+      <div class="page-head">
+        <h2 class="page-title">挖掘台</h2>
+      </div>
+      <div class="module-placeholder card">
+        <div class="module-ph-icon" aria-hidden="true">⬡</div>
+        <p class="hint">用大模型从语料中挖掘模式、标签、关系与难例。任务统一保存在 <strong>Job 列表</strong>，可随时恢复。</p>
+        <p class="module-ph-status">功能建设中 · 可先建任务占位</p>
+        <div class="module-ph-actions">
+          <button type="button" class="btn-create-typed-job" data-job-type="llm_mine">新建挖掘任务</button>
+          <button type="button" class="secondary" data-goto="jobs">打开 Job 列表</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="page-head">
+        <h2 class="page-title">系统设置</h2>
+      </div>
+      <div class="card settings-card">
+        <div class="settings-section">
+          <h3 class="settings-section-title">显示主题</h3>
+          <p class="hint">选择界面配色。黑夜保持现有深色；白天为浅色背景，便于日间使用。</p>
+          <div class="settings-theme-row" role="radiogroup" aria-label="显示主题">
+            <label class="settings-theme-opt" for="theme-dark">
+              <input type="radio" name="ui-theme" id="theme-dark" value="dark" />
+              <span class="settings-theme-preview preview-dark" aria-hidden="true">
+                <span class="stp-side"></span><span class="stp-main"></span>
+              </span>
+              <span class="settings-theme-name">黑夜</span>
+              <span class="settings-theme-desc">深色背景（当前默认）</span>
+            </label>
+            <label class="settings-theme-opt" for="theme-light">
+              <input type="radio" name="ui-theme" id="theme-light" value="light" />
+              <span class="settings-theme-preview preview-light" aria-hidden="true">
+                <span class="stp-side"></span><span class="stp-main"></span>
+              </span>
+              <span class="settings-theme-name">白天</span>
+              <span class="settings-theme-desc">浅色背景</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+      </main>
+    </div><!-- /.app-right -->
+  </div><!-- /.app-shell -->
+
+  <div id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
