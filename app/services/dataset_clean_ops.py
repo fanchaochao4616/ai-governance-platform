@@ -1163,32 +1163,6 @@ def list_effective_records(
     }
 
 
-def export_effective_csv(db: Session, dataset_id: int) -> tuple[Path, str, str]:
-    """导出当前生效样本（原始 − 未恢复删除），不改写原包。"""
-    from config import EXPORT_DIR, ensure_data_dirs
-    import csv
-
-    ds = dms.get_dataset(db, int(dataset_id))
-    if not ds:
-        raise ValueError("dataset not found")
-    root = store.dataset_root(ds.id)
-    act = active_records(root)
-    ensure_data_dirs()
-    out = EXPORT_DIR / f"cleaned_ds{ds.id}_{uuid.uuid4().hex[:8]}.csv"
-    with out.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["id", "text", "modality"])
-        w.writeheader()
-        for r in act:
-            w.writerow(
-                {
-                    "id": r["_sid"],
-                    "text": r.get("text") or "",
-                    "modality": r.get("modality") or "text",
-                }
-            )
-    return out, "text/csv; charset=utf-8", out.name
-
-
 def default_save_name(source_name: str, when: datetime | None = None) -> str:
     """默认保存名：原始数据名 + 清洗 + 清洗时间。"""
     base = (source_name or "数据集").strip() or "数据集"
